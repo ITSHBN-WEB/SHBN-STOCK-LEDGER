@@ -1,4 +1,5 @@
--- Stock ledger schema for Neon (Postgres). Safe to re-run.
+-- Stock ledger schema for Neon (Postgres).
+-- SAFE TO RE-RUN: works for a fresh install AND as an upgrade of an existing database.
 -- Principle: append-only ledger. Balances are ALWAYS computed from entries, never stored,
 -- so month-to-month carry-over can never drift or break (unlike the Excel M39/M40 links).
 
@@ -15,23 +16,44 @@ CREATE TABLE IF NOT EXISTS stock_entries (
   idempotency_key UUID UNIQUE,                            -- blocks double-click / retry duplicates
   source          TEXT          NOT NULL DEFAULT 'APP' CHECK (source IN ('APP','EXCEL_IMPORT')),
   voided_at       TIMESTAMPTZ,                            -- corrections = void, never DELETE
-  void_reason     TEXT,
-  CONSTRAINT upper_only CHECK (
-    (supplier   IS NULL OR supplier   = upper(supplier)) AND
-    (invoice_no IS NULL OR invoice_no = upper(invoice_no))),
-  -- new IN records from the app must be complete; imported history may have gaps
-  CONSTRAINT in_complete CHECK (
-    source <> 'APP' OR entry_type = 'OUT' OR
-    (coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> '' AND invoice_amount IS NOT NULL))
+  void_reason     TEXT
 );
+
+-- v2 columns: receiving details (IN) and record-by (OUT)
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS receiving_1 TEXT;
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS receiving_2 TEXT;
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS supervisor  TEXT;
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+
+-- Rules apply to NEW rows only (NOT VALID), so records saved before this upgrade never block it.
+ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS upper_only;
+ALTER TABLE stock_entries ADD CONSTRAINT upper_only CHECK (
+  (supplier    IS NULL OR supplier    = upper(supplier))    AND
+  (invoice_no  IS NULL OR invoice_no  = upper(invoice_no))  AND
+  (receiving_1 IS NULL OR receiving_1 = upper(receiving_1)) AND
+  (receiving_2 IS NULL OR receiving_2 = upper(receiving_2)) AND
+  (supervisor  IS NULL OR supervisor  = upper(supervisor))  AND
+  (recorded_by IS NULL OR recorded_by = upper(recorded_by))) NOT VALID;
+
+-- New records from the app must be complete; imported history may have gaps.
+ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS in_complete;
+ALTER TABLE stock_entries ADD CONSTRAINT in_complete CHECK (
+  source <> 'APP' OR
+  (entry_type = 'IN'  AND coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> ''
+                      AND invoice_amount IS NOT NULL
+                      AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> '') OR
+  (entry_type = 'OUT' AND coalesce(recorded_by,'') <> '')) NOT VALID;
+
 CREATE INDEX IF NOT EXISTS stock_entries_date_idx ON stock_entries (entry_date) WHERE voided_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO app_settings VALUES ('out_unit_price','2.50') ON CONFLICT DO NOTHING;  -- RM/KG, from Excel col K
 
 -- The ONLY way the app writes. One call = one atomic transaction.
+DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, uuid);  -- v1 signature
 CREATE OR REPLACE FUNCTION add_stock_entry(
-  p_type text, p_qty numeric, p_supplier text, p_invoice_no text, p_invoice_amount numeric, p_key uuid
+  p_type text, p_qty numeric, p_supplier text, p_invoice_no text, p_invoice_amount numeric,
+  p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_key uuid
 ) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_row stock_entries; v_bal numeric; v_price numeric;
@@ -58,11 +80,15 @@ BEGIN
 
   SELECT value::numeric INTO v_price FROM app_settings WHERE key = 'out_unit_price';
 
-  INSERT INTO stock_entries (entry_type, entry_date, quantity_kg, supplier, invoice_no, invoice_amount, unit_price, idempotency_key)
+  INSERT INTO stock_entries (entry_type, entry_date, quantity_kg, supplier, invoice_no, invoice_amount, unit_price,
+                             receiving_1, receiving_2, supervisor, recorded_by, idempotency_key)
   VALUES (p_type, (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date, p_qty,
           upper(nullif(btrim(p_supplier),'')), upper(nullif(btrim(p_invoice_no),'')),
           CASE WHEN p_type = 'IN' THEN p_invoice_amount END,
-          CASE WHEN p_type = 'OUT' THEN v_price END, p_key)
+          CASE WHEN p_type = 'OUT' THEN v_price END,
+          upper(nullif(btrim(p_receiving_1),'')), upper(nullif(btrim(p_receiving_2),'')),
+          upper(nullif(btrim(p_supervisor),'')),  upper(nullif(btrim(p_recorded_by),'')),
+          p_key)
   RETURNING * INTO v_row;
 
   v_bal := v_bal + CASE p_type WHEN 'IN' THEN p_qty ELSE -p_qty END;
@@ -99,9 +125,10 @@ SELECT jsonb_build_object(
   'month_opening', (SELECT qty FROM opening),
   'days', COALESCE((SELECT jsonb_agg(jsonb_build_object('date', d, 'opening', closing - in_kg + out_kg,
                     'in', in_kg, 'out', out_kg, 'closing', closing) ORDER BY d) FROM ledger), '[]'::jsonb),
-  'entries', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'type', entry_type, 'ts', entry_ts,
+  'entries', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'type', entry_type, 'date', entry_date, 'ts', entry_ts,
                     'supplier', supplier, 'invoice_no', invoice_no, 'invoice_amount', invoice_amount,
-                    'qty', quantity_kg) ORDER BY entry_ts, id)
+                    'receiving_1', receiving_1, 'receiving_2', receiving_2, 'supervisor', supervisor,
+                    'recorded_by', recorded_by, 'qty', quantity_kg) ORDER BY entry_ts, id)
               FROM stock_entries, bounds
               WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first), '[]'::jsonb)
 );
