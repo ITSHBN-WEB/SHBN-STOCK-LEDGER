@@ -24,6 +24,8 @@ ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS receiving_1 TEXT;
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS receiving_2 TEXT;
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS supervisor  TEXT;
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+-- v3 column: invoice photos/PDFs (max 3), stored as links: [{url,name,type,size}]
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS invoice_files JSONB;
 
 -- Rules apply to NEW rows only (NOT VALID), so records saved before this upgrade never block it.
 ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS upper_only;
@@ -41,8 +43,14 @@ ALTER TABLE stock_entries ADD CONSTRAINT in_complete CHECK (
   source <> 'APP' OR
   (entry_type = 'IN'  AND coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> ''
                       AND invoice_amount IS NOT NULL
-                      AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> '') OR
+                      AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> ''
+                      AND (CASE WHEN jsonb_typeof(invoice_files) = 'array'
+                                THEN jsonb_array_length(invoice_files) ELSE 0 END) BETWEEN 1 AND 3) OR
   (entry_type = 'OUT' AND coalesce(recorded_by,'') <> '')) NOT VALID;
+
+ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS invoice_files_ok;
+ALTER TABLE stock_entries ADD CONSTRAINT invoice_files_ok CHECK (
+  invoice_files IS NULL OR (jsonb_typeof(invoice_files) = 'array' AND jsonb_array_length(invoice_files) <= 3)) NOT VALID;
 
 CREATE INDEX IF NOT EXISTS stock_entries_date_idx ON stock_entries (entry_date) WHERE voided_at IS NULL;
 
@@ -51,9 +59,10 @@ INSERT INTO app_settings VALUES ('out_unit_price','2.50') ON CONFLICT DO NOTHING
 
 -- The ONLY way the app writes. One call = one atomic transaction.
 DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, uuid);  -- v1 signature
+DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, uuid);  -- v2 signature
 CREATE OR REPLACE FUNCTION add_stock_entry(
   p_type text, p_qty numeric, p_supplier text, p_invoice_no text, p_invoice_amount numeric,
-  p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_key uuid
+  p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_files jsonb, p_key uuid
 ) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_row stock_entries; v_bal numeric; v_price numeric;
@@ -81,14 +90,14 @@ BEGIN
   SELECT value::numeric INTO v_price FROM app_settings WHERE key = 'out_unit_price';
 
   INSERT INTO stock_entries (entry_type, entry_date, quantity_kg, supplier, invoice_no, invoice_amount, unit_price,
-                             receiving_1, receiving_2, supervisor, recorded_by, idempotency_key)
+                             receiving_1, receiving_2, supervisor, recorded_by, invoice_files, idempotency_key)
   VALUES (p_type, (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date, p_qty,
           upper(nullif(btrim(p_supplier),'')), upper(nullif(btrim(p_invoice_no),'')),
           CASE WHEN p_type = 'IN' THEN p_invoice_amount END,
           CASE WHEN p_type = 'OUT' THEN v_price END,
           upper(nullif(btrim(p_receiving_1),'')), upper(nullif(btrim(p_receiving_2),'')),
           upper(nullif(btrim(p_supervisor),'')),  upper(nullif(btrim(p_recorded_by),'')),
-          p_key)
+          CASE WHEN p_type = 'IN' THEN p_files END, p_key)
   RETURNING * INTO v_row;
 
   v_bal := v_bal + CASE p_type WHEN 'IN' THEN p_qty ELSE -p_qty END;
@@ -128,7 +137,7 @@ SELECT jsonb_build_object(
   'entries', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'type', entry_type, 'date', entry_date, 'ts', entry_ts,
                     'supplier', supplier, 'invoice_no', invoice_no, 'invoice_amount', invoice_amount,
                     'receiving_1', receiving_1, 'receiving_2', receiving_2, 'supervisor', supervisor,
-                    'recorded_by', recorded_by, 'qty', quantity_kg) ORDER BY entry_ts, id)
+                    'recorded_by', recorded_by, 'files', invoice_files, 'qty', quantity_kg) ORDER BY entry_ts, id)
               FROM stock_entries, bounds
               WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first), '[]'::jsonb)
 );
