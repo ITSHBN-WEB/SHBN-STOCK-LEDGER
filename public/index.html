@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STOCK LEDGER</title>
+<style>
+  :root { --ink:#fff; --muted:rgba(255,255,255,.72); --glass:rgba(255,255,255,.12); --line:rgba(255,255,255,.22); --in:#7ef0b0; --out:#ffb4b4; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; color:var(--ink); font-family:Arial,Helvetica,sans-serif;
+         background:linear-gradient(135deg,#1d4ed8 0%,#4f46e5 50%,#7e22ce 100%) fixed; }
+  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:18px; letter-spacing:.12em; margin:0 0 16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tab { flex:1; padding:12px; border:1px solid var(--line); background:var(--glass); color:var(--ink);
+         border-radius:10px; font-weight:700; letter-spacing:.08em; cursor:pointer; font-size:14px; }
+  .tab.active { background:#fff; color:#4338ca; }
+  .card { background:var(--glass); border:1px solid var(--line); border-radius:14px; padding:18px; backdrop-filter:blur(6px); margin-bottom:16px; }
+  .balance { text-align:center; }
+  .balance small { color:var(--muted); letter-spacing:.14em; font-size:12px; }
+  .balance .num { font-size:44px; font-weight:700; margin-top:4px; }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  input, button.save { font:inherit; }
+  input[type=month], input[type=text], input[type=password] { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line);
+         background:rgba(255,255,255,.95); color:#1e1b4b; font-size:16px; text-transform:uppercase; }
+  input[type=month] { width:auto; text-transform:none; }
+  label { display:block; font-size:12px; letter-spacing:.1em; color:var(--muted); margin:12px 0 6px; }
+  button.save { width:100%; margin-top:18px; padding:14px; border:0; border-radius:10px; background:#fff; color:#4338ca;
+         font-weight:700; letter-spacing:.1em; font-size:15px; cursor:pointer; }
+  button.save:disabled { opacity:.5; cursor:wait; }
+  .sub { display:flex; gap:8px; margin-bottom:6px; }
+  .sub .tab { padding:9px; font-size:13px; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; min-width:520px; }
+  th { text-align:right; font-size:11px; letter-spacing:.1em; color:var(--muted); padding:8px; border-bottom:1px solid var(--line); }
+  td { text-align:right; padding:8px; border-bottom:1px solid rgba(255,255,255,.1); font-variant-numeric:tabular-nums; }
+  th:first-child, td:first-child { text-align:left; }
+  td.in { color:var(--in); } td.out { color:var(--out); }
+  .badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:99px; background:rgba(255,255,255,.18); }
+  .msg { margin-top:12px; padding:10px 12px; border-radius:10px; font-size:14px; display:none; }
+  .msg.ok { display:block; background:rgba(126,240,176,.2); } .msg.err { display:block; background:rgba(255,120,120,.28); }
+  .hidden { display:none; } .muted { color:var(--muted); font-size:13px; }
+  h2 { font-size:13px; letter-spacing:.12em; margin:0 0 10px; }
+  @media print { body { background:#fff; color:#000; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>STOCK LEDGER &mdash; MINYAK PAKET 1KG</h1>
+  <div class="tabs">
+    <button class="tab active" data-tab="dash">DASHBOARD</button>
+    <button class="tab" data-tab="add">ADD RECORD</button>
+  </div>
+
+  <!-- DASHBOARD -->
+  <section id="dash">
+    <div class="card balance"><small>CURRENT BALANCE STOCK</small><div class="num"><span id="bal">-</span> KG</div></div>
+    <div class="card">
+      <div class="toolbar"><h2 style="margin:0">DAILY RECORD</h2><input type="month" id="month"></div>
+      <div class="scroll"><table>
+        <thead><tr><th>DATE</th><th>OPENING (KG)</th><th>IN (KG)</th><th>OUT (KG)</th><th>BALANCE (KG)</th></tr></thead>
+        <tbody id="days"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>TRANSACTIONS</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>TIME</th><th>TYPE</th><th>SUPPLIER</th><th>INVOICE NO.</th><th>AMOUNT (RM)</th><th>QTY (KG)</th></tr></thead>
+        <tbody id="entries"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ADD RECORD -->
+  <section id="add" class="hidden">
+    <div class="card">
+      <div class="sub">
+        <button class="tab active" data-sub="in">INSTOCK</button>
+        <button class="tab" data-sub="out">OUTSTOCK</button>
+      </div>
+
+      <div id="sub-in">
+        <label>SUPPLIER</label><input type="text" id="supplier" autocomplete="off">
+        <label>INVOICE NUMBER</label><input type="text" id="invno" autocomplete="off">
+        <label>INVOICE AMOUNT</label><input type="text" id="amount" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
+        <label>QUANTITY (KG)</label><input type="text" id="qty-in" inputmode="decimal" autocomplete="off">
+        <button class="save" id="save-in">SAVE INSTOCK</button>
+        <div class="msg" id="msg-in"></div>
+      </div>
+
+      <div id="sub-out" class="hidden">
+        <label>QUANTITY (KG)</label><input type="text" id="qty-out" inputmode="decimal" autocomplete="off">
+        <button class="save" id="save-out">SAVE OUTSTOCK</button>
+        <div class="msg" id="msg-out"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const TZ = 'Asia/Kuala_Lumpur';
+const fmt = (n) => Number(n).toLocaleString('en-MY', { maximumFractionDigits: 2 });
+const rm  = (n) => n == null ? '' : Number(n).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ---- API (with optional passcode) ----
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', 'x-passcode': sessionStorage.getItem('pc') || '' };
+  let res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    const pc = prompt('ENTER PASSCODE');
+    if (pc === null) throw new Error('PASSCODE REQUIRED');
+    sessionStorage.setItem('pc', pc);
+    headers['x-passcode'] = pc;
+    res = await fetch(path, { ...opts, headers });
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'REQUEST FAILED');
+  return data;
+}
+
+// ---- Tabs ----
+document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
+  $('dash').classList.toggle('hidden', b.dataset.tab !== 'dash');
+  $('add').classList.toggle('hidden', b.dataset.tab !== 'add');
+  if (b.dataset.tab === 'dash') loadLedger();
+});
+document.querySelectorAll('[data-sub]').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('[data-sub]').forEach((x) => x.classList.toggle('active', x === b));
+  $('sub-in').classList.toggle('hidden', b.dataset.sub !== 'in');
+  $('sub-out').classList.toggle('hidden', b.dataset.sub !== 'out');
+});
+
+// ---- Dashboard ----
+const nowMY = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+$('month').value = nowMY.slice(0, 7);
+$('month').onchange = loadLedger;
+
+async function loadLedger() {
+  try {
+    const d = await api('/api/ledger?month=' + $('month').value);
+    $('bal').textContent = fmt(d.balance);
+    $('days').innerHTML = d.days.map((r) => `<tr><td>${r.date.split('-').reverse().join('/')}</td><td>${fmt(r.opening)}</td>
+      <td class="in">${r.in ? '+' + fmt(r.in) : '-'}</td><td class="out">${r.out ? '-' + fmt(r.out) : '-'}</td><td><b>${fmt(r.closing)}</b></td></tr>`).join('')
+      || '<tr><td colspan="5" class="muted">NO DAYS TO SHOW</td></tr>';
+    $('entries').innerHTML = d.entries.slice().reverse().map((e) => `<tr>
+      <td>${new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).toUpperCase()}</td>
+      <td><span class="badge">${e.type === 'IN' ? 'IN' : 'OUT'}</span></td><td>${esc(e.supplier || '')}</td><td>${esc(e.invoice_no || '')}</td>
+      <td>${rm(e.invoice_amount)}</td><td class="${e.type === 'IN' ? 'in' : 'out'}">${e.type === 'IN' ? '+' : '-'}${fmt(e.qty)}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="muted">NO TRANSACTIONS THIS MONTH</td></tr>';
+  } catch (e) { $('bal').textContent = '!'; alert(e.message); }
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---- Inputs: ALL CAPS, quantity, RM 1,234.56 ----
+['supplier', 'invno'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+['qty-in', 'qty-out'].forEach((id) => $(id).addEventListener('input', (e) => {
+  let v = e.target.value.replace(/[^\d.]/g, ''); const p = v.split('.');
+  e.target.value = p.length > 1 ? p[0] + '.' + p.slice(1).join('').slice(0, 2) : v;
+}));
+function maskRM(raw) {
+  let v = raw.replace(/[^\d.]/g, ''); if (!v) return '';
+  const p = v.split('.'); let int = p[0].replace(/^0+(?=\d)/, '');
+  int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return 'RM ' + int + (p.length > 1 ? '.' + p.slice(1).join('').slice(0, 2) : '');
+}
+$('amount').addEventListener('input', (e) => { e.target.value = maskRM(e.target.value); });
+$('amount').addEventListener('blur', (e) => {
+  if (!e.target.value) return;
+  const [i, d = ''] = e.target.value.replace('RM ', '').split('.');
+  e.target.value = 'RM ' + (i || '0') + '.' + (d + '00').slice(0, 2);
+});
+const amountValue = () => $('amount').value.replace(/[^\d.]/g, '');
+
+// ---- Save (idempotency key per form: a double-click or retry can never duplicate) ----
+let keyIn = crypto.randomUUID(), keyOut = crypto.randomUUID();
+function show(id, ok, text) { const m = $(id); m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = text; }
+
+async function submit(btnId, msgId, payload, onDone) {
+  const btn = $(btnId); btn.disabled = true;
+  try {
+    const r = await api('/api/entries', { method: 'POST', body: JSON.stringify(payload) });
+    show(msgId, true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
+    onDone();
+  } catch (e) { show(msgId, false, e.message); }
+  finally { btn.disabled = false; }
+}
+$('save-in').onclick = () => submit('save-in', 'msg-in',
+  { type: 'IN', supplier: $('supplier').value, invoiceNo: $('invno').value, invoiceAmount: amountValue(), quantity: $('qty-in').value, key: keyIn },
+  () => { ['supplier', 'invno', 'amount', 'qty-in'].forEach((i) => $(i).value = ''); keyIn = crypto.randomUUID(); });
+$('save-out').onclick = () => submit('save-out', 'msg-out',
+  { type: 'OUT', quantity: $('qty-out').value, key: keyOut },
+  () => { $('qty-out').value = ''; keyOut = crypto.randomUUID(); });
+
+loadLedger();
+</script>
+</body>
+</html>
