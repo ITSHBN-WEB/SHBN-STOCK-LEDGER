@@ -41,6 +41,21 @@
   .msg.ok { display:block; background:rgba(126,240,176,.2); } .msg.err { display:block; background:rgba(255,120,120,.28); }
   .hidden { display:none; } .muted { color:var(--muted); font-size:13px; }
   h2 { font-size:13px; letter-spacing:.12em; margin:0 0 10px; }
+  .actions { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-top:18px; }
+  .actions button.save { margin-top:0; }
+  button.clear { padding:14px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--ink);
+         font:inherit; font-weight:700; letter-spacing:.1em; font-size:15px; cursor:pointer; }
+  .group { margin-top:20px; padding-top:4px; border-top:1px solid var(--line); font-size:12px; font-weight:700; letter-spacing:.12em; color:var(--muted); }
+  .group + label { margin-top:8px; }
+  .opt { text-transform:none; letter-spacing:0; opacity:.8; }
+  button.exp { width:34px; height:30px; border-radius:8px; border:1px solid var(--line); background:var(--glass); color:var(--ink); cursor:pointer; font-size:14px; }
+  button.exp:disabled { opacity:.25; cursor:default; }
+  tr.detail > td { padding:0 8px 12px; text-align:left; }
+  .det { background:rgba(0,0,0,.18); border-radius:10px; padding:10px 12px; margin-top:8px; text-align:left; }
+  .det-h { display:flex; justify-content:space-between; gap:8px; font-size:13px; margin-bottom:8px; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 14px; font-size:13px; }
+  .kv span { display:block; font-size:10px; letter-spacing:.1em; color:var(--muted); }
+  .kv b { font-weight:700; word-break:break-word; }
   @media print { body { background:#fff; color:#000; } }
 </style>
 </head>
@@ -58,14 +73,8 @@
     <div class="card">
       <div class="toolbar"><h2 style="margin:0">DAILY RECORD</h2><input type="month" id="month"></div>
       <div class="scroll"><table>
-        <thead><tr><th>DATE</th><th>OPENING (KG)</th><th>IN (KG)</th><th>OUT (KG)</th><th>BALANCE (KG)</th></tr></thead>
+        <thead><tr><th>DATE</th><th>OPENING (KG)</th><th>IN (KG)</th><th>OUT (KG)</th><th>BALANCE (KG)</th><th></th></tr></thead>
         <tbody id="days"></tbody></table></div>
-    </div>
-    <div class="card">
-      <h2>TRANSACTIONS</h2>
-      <div class="scroll"><table>
-        <thead><tr><th>TIME</th><th>TYPE</th><th>SUPPLIER</th><th>INVOICE NO.</th><th>AMOUNT (RM)</th><th>QTY (KG)</th></tr></thead>
-        <tbody id="entries"></tbody></table></div>
     </div>
   </section>
 
@@ -82,13 +91,18 @@
         <label>INVOICE NUMBER</label><input type="text" id="invno" autocomplete="off">
         <label>INVOICE AMOUNT</label><input type="text" id="amount" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
         <label>QUANTITY (KG)</label><input type="text" id="qty-in" inputmode="decimal" autocomplete="off">
-        <button class="save" id="save-in">SAVE INSTOCK</button>
+        <div class="group">RECEIVING DETAILS</div>
+        <label>RECEIVING 1</label><input type="text" id="rcv1" class="caps" autocomplete="off">
+        <label>RECEIVING 2 <span class="opt">(OPTIONAL)</span></label><input type="text" id="rcv2" class="caps" autocomplete="off">
+        <label>SUPERVISOR</label><input type="text" id="sup" class="caps" autocomplete="off">
+        <div class="actions"><button class="clear" id="clear-in" type="button">CLEAR</button><button class="save" id="save-in">SAVE INSTOCK</button></div>
         <div class="msg" id="msg-in"></div>
       </div>
 
       <div id="sub-out" class="hidden">
         <label>QUANTITY (KG)</label><input type="text" id="qty-out" inputmode="decimal" autocomplete="off">
-        <button class="save" id="save-out">SAVE OUTSTOCK</button>
+        <label>RECORD BY</label><input type="text" id="recby" class="caps" autocomplete="off">
+        <div class="actions"><button class="clear" id="clear-out" type="button">CLEAR</button><button class="save" id="save-out">SAVE OUTSTOCK</button></div>
         <div class="msg" id="msg-out"></div>
       </div>
     </div>
@@ -135,24 +149,51 @@ const nowMY = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-
 $('month').value = nowMY.slice(0, 7);
 $('month').onchange = loadLedger;
 
+const open = new Set();               // expanded days survive refresh
+let lastData = null;
+const timeOf = (ts) => new Date(ts).toLocaleTimeString('en-MY', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase();
+const kv = (k, v) => `<div><span>${k}</span><b>${v ? esc(String(v)) : '-'}</b></div>`;
+
+function detailHTML(e) {
+  const head = `<div class="det-h"><div><span class="badge">${e.type}</span> &nbsp;${timeOf(e.ts)}</div>
+    <b class="${e.type === 'IN' ? 'in' : 'out'}">${e.type === 'IN' ? '+' : '-'}${fmt(e.qty)} KG</b></div>`;
+  const body = e.type === 'IN'
+    ? kv('SUPPLIER', e.supplier) + kv('INVOICE NO.', e.invoice_no) + kv('INVOICE AMOUNT', e.invoice_amount == null ? '' : 'RM ' + rm(e.invoice_amount))
+      + kv('RECEIVING 1', e.receiving_1) + kv('RECEIVING 2', e.receiving_2) + kv('SUPERVISOR', e.supervisor)
+    : kv('TIMESTAMP', new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase())
+      + kv('RECORD BY', e.recorded_by);
+  return `<div class="det">${head}<div class="kv">${body}</div></div>`;
+}
+
+function renderLedger() {
+  const d = lastData; if (!d) return;
+  $('bal').textContent = fmt(d.balance);
+  const byDay = {};
+  d.entries.forEach((e) => (byDay[e.date] = byDay[e.date] || []).push(e));
+  $('days').innerHTML = d.days.map((r) => {
+    const list = byDay[r.date] || [], isOpen = open.has(r.date);
+    return `<tr><td>${r.date.split('-').reverse().join('/')}</td><td>${fmt(r.opening)}</td>
+      <td class="in">${r.in ? '+' + fmt(r.in) : '-'}</td><td class="out">${r.out ? '-' + fmt(r.out) : '-'}</td><td><b>${fmt(r.closing)}</b></td>
+      <td><button class="exp" data-d="${r.date}" ${list.length ? '' : 'disabled'} title="${list.length ? 'SHOW / HIDE DETAILS' : 'NO RECORDS'}">${isOpen && list.length ? '&#9662;' : '&#9656;'}</button></td></tr>`
+      + (isOpen && list.length ? `<tr class="detail"><td colspan="6">${list.map(detailHTML).join('')}</td></tr>` : '');
+  }).join('') || '<tr><td colspan="6" class="muted">NO DAYS TO SHOW</td></tr>';
+}
+$('days').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button.exp'); if (!b || b.disabled) return;
+  open.has(b.dataset.d) ? open.delete(b.dataset.d) : open.add(b.dataset.d);
+  renderLedger();
+});
+
 async function loadLedger() {
   try {
-    const d = await api('/api/ledger?month=' + $('month').value);
-    $('bal').textContent = fmt(d.balance);
-    $('days').innerHTML = d.days.map((r) => `<tr><td>${r.date.split('-').reverse().join('/')}</td><td>${fmt(r.opening)}</td>
-      <td class="in">${r.in ? '+' + fmt(r.in) : '-'}</td><td class="out">${r.out ? '-' + fmt(r.out) : '-'}</td><td><b>${fmt(r.closing)}</b></td></tr>`).join('')
-      || '<tr><td colspan="5" class="muted">NO DAYS TO SHOW</td></tr>';
-    $('entries').innerHTML = d.entries.slice().reverse().map((e) => `<tr>
-      <td>${new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).toUpperCase()}</td>
-      <td><span class="badge">${e.type === 'IN' ? 'IN' : 'OUT'}</span></td><td>${esc(e.supplier || '')}</td><td>${esc(e.invoice_no || '')}</td>
-      <td>${rm(e.invoice_amount)}</td><td class="${e.type === 'IN' ? 'in' : 'out'}">${e.type === 'IN' ? '+' : '-'}${fmt(e.qty)}</td></tr>`).join('')
-      || '<tr><td colspan="6" class="muted">NO TRANSACTIONS THIS MONTH</td></tr>';
+    lastData = await api('/api/ledger?month=' + $('month').value);
+    renderLedger();
   } catch (e) { $('bal').textContent = '!'; alert(e.message); }
 }
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ---- Inputs: ALL CAPS, quantity, RM 1,234.56 ----
-['supplier', 'invno'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+['supplier', 'invno', 'rcv1', 'rcv2', 'sup', 'recby'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
 ['qty-in', 'qty-out'].forEach((id) => $(id).addEventListener('input', (e) => {
   let v = e.target.value.replace(/[^\d.]/g, ''); const p = v.split('.');
   e.target.value = p.length > 1 ? p[0] + '.' + p.slice(1).join('').slice(0, 2) : v;
@@ -184,12 +225,18 @@ async function submit(btnId, msgId, payload, onDone) {
   } catch (e) { show(msgId, false, e.message); }
   finally { btn.disabled = false; }
 }
+const clearIn  = () => { ['supplier', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); };
+const clearOut = () => { ['qty-out', 'recby'].forEach((i) => $(i).value = ''); };
+$('clear-in').onclick  = () => { clearIn();  $('msg-in').className = 'msg'; };
+$('clear-out').onclick = () => { clearOut(); $('msg-out').className = 'msg'; };
+
 $('save-in').onclick = () => submit('save-in', 'msg-in',
-  { type: 'IN', supplier: $('supplier').value, invoiceNo: $('invno').value, invoiceAmount: amountValue(), quantity: $('qty-in').value, key: keyIn },
-  () => { ['supplier', 'invno', 'amount', 'qty-in'].forEach((i) => $(i).value = ''); keyIn = crypto.randomUUID(); });
+  { type: 'IN', supplier: $('supplier').value, invoiceNo: $('invno').value, invoiceAmount: amountValue(), quantity: $('qty-in').value,
+    receiving1: $('rcv1').value, receiving2: $('rcv2').value, supervisor: $('sup').value, key: keyIn },
+  () => { clearIn(); keyIn = crypto.randomUUID(); });
 $('save-out').onclick = () => submit('save-out', 'msg-out',
-  { type: 'OUT', quantity: $('qty-out').value, key: keyOut },
-  () => { $('qty-out').value = ''; keyOut = crypto.randomUUID(); });
+  { type: 'OUT', quantity: $('qty-out').value, recordedBy: $('recby').value, key: keyOut },
+  () => { clearOut(); keyOut = crypto.randomUUID(); });
 
 loadLedger();
 </script>
