@@ -56,6 +56,13 @@
   .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 14px; font-size:13px; }
   .kv span { display:block; font-size:10px; letter-spacing:.1em; color:var(--muted); }
   .kv b { font-weight:700; word-break:break-word; }
+  .lnk { color:#fff; font-weight:700; text-decoration:underline; margin-right:12px; white-space:nowrap; }
+  .frow { display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.12); border-radius:10px; padding:8px 10px; margin-top:8px; font-size:13px; }
+  .frow img, .frow .pdf { width:40px; height:40px; border-radius:6px; flex:none; object-fit:cover; }
+  .frow .pdf { display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.25); font-size:11px; font-weight:700; }
+  .frow .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .frow button { border:0; background:rgba(0,0,0,.25); color:#fff; border-radius:8px; width:30px; height:30px; cursor:pointer; font-size:14px; }
+  button.pick { width:100%; padding:12px; border-radius:10px; border:1px dashed rgba(255,255,255,.6); background:transparent; color:#fff; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
   @media print { body { background:#fff; color:#000; } }
 </style>
 </head>
@@ -87,6 +94,10 @@
       </div>
 
       <div id="sub-in">
+        <label>INVOICE FILE <span class="opt">(PHOTO OR PDF, 1 TO 3 FILES)</span></label>
+        <input type="file" id="files" accept="image/*,application/pdf" multiple class="hidden">
+        <button type="button" class="pick" id="pick">+ ADD PHOTO / PDF</button>
+        <div id="filelist"></div>
         <label>SUPPLIER</label><input type="text" id="supplier" autocomplete="off">
         <label>INVOICE NUMBER</label><input type="text" id="invno" autocomplete="off">
         <label>INVOICE AMOUNT</label><input type="text" id="amount" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
@@ -153,6 +164,8 @@ const open = new Set();               // expanded days survive refresh
 let lastData = null;
 const timeOf = (ts) => new Date(ts).toLocaleTimeString('en-MY', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase();
 const kv = (k, v) => `<div><span>${k}</span><b>${v ? esc(String(v)) : '-'}</b></div>`;
+const fileLinks = (e) => (e.files || []).filter((f) => String(f.url).startsWith('https://'))
+  .map((f, i) => `<a class="lnk" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name || '')}">${f.type === 'application/pdf' ? 'PDF' : 'PHOTO'} ${i + 1}</a>`).join('');
 
 function detailHTML(e) {
   const head = `<div class="det-h"><div><span class="badge">${e.type}</span> &nbsp;${timeOf(e.ts)}</div>
@@ -160,6 +173,7 @@ function detailHTML(e) {
   const body = e.type === 'IN'
     ? kv('SUPPLIER', e.supplier) + kv('INVOICE NO.', e.invoice_no) + kv('INVOICE AMOUNT', e.invoice_amount == null ? '' : 'RM ' + rm(e.invoice_amount))
       + kv('RECEIVING 1', e.receiving_1) + kv('RECEIVING 2', e.receiving_2) + kv('SUPERVISOR', e.supervisor)
+      + `<div><span>INVOICE FILES</span><b>${fileLinks(e) || '-'}</b></div>`
     : kv('TIMESTAMP', new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase())
       + kv('RECORD BY', e.recorded_by);
   return `<div class="det">${head}<div class="kv">${body}</div></div>`;
@@ -225,15 +239,87 @@ async function submit(btnId, msgId, payload, onDone) {
   } catch (e) { show(msgId, false, e.message); }
   finally { btn.disabled = false; }
 }
-const clearIn  = () => { ['supplier', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); };
+// ---- Invoice files: pick (max 3), shrink photos in the browser, upload before saving ----
+const MAX_FILES = 3, PDF_MAX = 3_000_000, IMG_MAX = 1_400_000;
+let picked = [];   // { name, type, blob, thumb, uploaded }
+
+async function shrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('CANNOT READ IMAGE. USE JPG, PNG OR PDF')); i.src = url; });
+    let scale = Math.min(1, 1800 / Math.max(img.width, img.height));
+    for (const q of [0.78, 0.65, 0.5]) {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+      if (blob && blob.size <= IMG_MAX) return blob;
+      scale *= 0.8;
+    }
+    throw new Error('IMAGE TOO LARGE');
+  } finally { URL.revokeObjectURL(url); }
+}
+const toBase64 = (blob) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(blob); });
+
+function renderFiles() {
+  $('filelist').innerHTML = picked.map((p, i) => `<div class="frow">
+    ${p.thumb ? `<img src="${p.thumb}" alt="">` : '<div class="pdf">PDF</div>'}
+    <div class="nm">${esc(p.name)}<br><span class="muted">${Math.max(1, Math.round(p.blob.size / 1024))} KB</span></div>
+    <button type="button" data-i="${i}" title="REMOVE">&#10005;</button></div>`).join('');
+  $('pick').textContent = picked.length >= MAX_FILES ? 'MAXIMUM 3 FILES' : '+ ADD PHOTO / PDF';
+  $('pick').disabled = picked.length >= MAX_FILES;
+}
+function resetFiles() { picked.forEach((p) => p.thumb && URL.revokeObjectURL(p.thumb)); picked = []; renderFiles(); }
+$('pick').onclick = () => $('files').click();
+$('filelist').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-i]'); if (!b) return;
+  const [p] = picked.splice(Number(b.dataset.i), 1); if (p.thumb) URL.revokeObjectURL(p.thumb); renderFiles();
+});
+$('files').addEventListener('change', async (ev) => {
+  const list = [...ev.target.files]; ev.target.value = '';
+  const errs = [];
+  for (const f of list) {
+    if (picked.length >= MAX_FILES) { errs.push('MAXIMUM 3 FILES'); break; }
+    try {
+      if (f.type === 'application/pdf') {
+        if (f.size > PDF_MAX) throw new Error(`${f.name}: PDF TOO LARGE (MAX 3 MB)`);
+        picked.push({ name: f.name, type: 'application/pdf', blob: f, thumb: null, uploaded: null });
+      } else if (f.type.startsWith('image/')) {
+        const blob = await shrink(f);
+        picked.push({ name: f.name.replace(/\.\w+$/, '') + '.jpg', type: 'image/jpeg', blob, thumb: URL.createObjectURL(blob), uploaded: null });
+      } else throw new Error(`${f.name}: ONLY PHOTO OR PDF`);
+    } catch (e) { errs.push(e.message); }
+    renderFiles();
+  }
+  if (errs.length) show('msg-in', false, errs.join(' | '));
+});
+
+const clearIn  = () => { ['supplier', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); resetFiles(); };
 const clearOut = () => { ['qty-out', 'recby'].forEach((i) => $(i).value = ''); };
 $('clear-in').onclick  = () => { clearIn();  $('msg-in').className = 'msg'; };
 $('clear-out').onclick = () => { clearOut(); $('msg-out').className = 'msg'; };
 
-$('save-in').onclick = () => submit('save-in', 'msg-in',
-  { type: 'IN', supplier: $('supplier').value, invoiceNo: $('invno').value, invoiceAmount: amountValue(), quantity: $('qty-in').value,
-    receiving1: $('rcv1').value, receiving2: $('rcv2').value, supervisor: $('sup').value, key: keyIn },
-  () => { clearIn(); keyIn = crypto.randomUUID(); });
+$('save-in').onclick = async () => {
+  const v = (id) => $(id).value.trim();
+  const need = !picked.length ? 'ATTACH AT LEAST 1 INVOICE FILE' : !v('supplier') ? 'SUPPLIER IS REQUIRED' : !v('invno') ? 'INVOICE NUMBER IS REQUIRED'
+    : !amountValue() ? 'ENTER A VALID INVOICE AMOUNT' : !Number(v('qty-in')) ? 'ENTER A VALID QUANTITY (KG)'
+    : !v('rcv1') ? 'RECEIVING 1 IS REQUIRED' : !v('sup') ? 'SUPERVISOR IS REQUIRED' : '';
+  if (need) return show('msg-in', false, need);        // check BEFORE uploading, so no stray files are stored
+  const btn = $('save-in'); btn.disabled = true;
+  try {
+    for (let i = 0; i < picked.length; i++) {
+      const p = picked[i]; if (p.uploaded) continue;      // already uploaded on an earlier attempt
+      show('msg-in', true, `UPLOADING FILE ${i + 1} OF ${picked.length}...`);
+      p.uploaded = await api('/api/upload', { method: 'POST', body: JSON.stringify({ name: p.name, type: p.type, data: await toBase64(p.blob) }) });
+    }
+    const r = await api('/api/entries', { method: 'POST', body: JSON.stringify({
+      type: 'IN', supplier: v('supplier'), invoiceNo: v('invno'), invoiceAmount: amountValue(), quantity: v('qty-in'),
+      receiving1: v('rcv1'), receiving2: v('rcv2'), supervisor: v('sup'), files: picked.map((p) => p.uploaded), key: keyIn }) });
+    show('msg-in', true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
+    clearIn(); keyIn = crypto.randomUUID();
+  } catch (e) { show('msg-in', false, e.message); }
+  finally { btn.disabled = false; }
+};
 $('save-out').onclick = () => submit('save-out', 'msg-out',
   { type: 'OUT', quantity: $('qty-out').value, recordedBy: $('recby').value, key: keyOut },
   () => { clearOut(); keyOut = crypto.randomUUID(); });
