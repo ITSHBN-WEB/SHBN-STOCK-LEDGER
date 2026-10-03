@@ -3,15 +3,21 @@ import { sql, guard } from '../lib/db.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (v) => /^\d{1,10}(\.\d{1,2})?$/.test(String(v ?? '').trim());
 
-// POST /api/entries  { type:'IN'|'OUT', quantity, supplier?, invoiceNo?, invoiceAmount?, key }
+const clean = (v) => String(v || '').trim().toUpperCase().slice(0, 60);
+
+// POST /api/entries
+//  IN : { type, quantity, supplier, invoiceNo, invoiceAmount, receiving1, receiving2?, supervisor, key }
+//  OUT: { type, quantity, recordedBy, key }
 export default async function handler(req, res) {
   if (!guard(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'METHOD NOT ALLOWED' });
 
   const b = req.body || {};
   const type = String(b.type || '').toUpperCase();
-  const supplier = String(b.supplier || '').trim().toUpperCase();
-  const invoiceNo = String(b.invoiceNo || '').trim().toUpperCase();
+  const supplier = clean(b.supplier);
+  const invoiceNo = clean(b.invoiceNo);
+  const receiving1 = clean(b.receiving1), receiving2 = clean(b.receiving2);
+  const supervisor = clean(b.supervisor), recordedBy = clean(b.recordedBy);
   const key = UUID.test(b.key || '') ? b.key : null;
 
   if (!['IN', 'OUT'].includes(type)) return res.status(400).json({ error: 'INVALID TYPE' });
@@ -20,12 +26,18 @@ export default async function handler(req, res) {
     if (!supplier) return res.status(400).json({ error: 'SUPPLIER IS REQUIRED' });
     if (!invoiceNo) return res.status(400).json({ error: 'INVOICE NUMBER IS REQUIRED' });
     if (!money(b.invoiceAmount)) return res.status(400).json({ error: 'ENTER A VALID INVOICE AMOUNT' });
+    if (!receiving1) return res.status(400).json({ error: 'RECEIVING 1 IS REQUIRED' });
+    if (!supervisor) return res.status(400).json({ error: 'SUPERVISOR IS REQUIRED' });
+  } else if (!recordedBy) {
+    return res.status(400).json({ error: 'RECORD BY IS REQUIRED' });
   }
 
   try {
+    const IN = type === 'IN';
     const rows = await sql`SELECT add_stock_entry(
-      ${type}, ${Number(b.quantity)}, ${type === 'IN' ? supplier : null}, ${type === 'IN' ? invoiceNo : null},
-      ${type === 'IN' ? Number(b.invoiceAmount) : null}, ${key}::uuid) AS result`;
+      ${type}, ${Number(b.quantity)}, ${IN ? supplier : null}, ${IN ? invoiceNo : null},
+      ${IN ? Number(b.invoiceAmount) : null}, ${IN ? receiving1 : null}, ${IN ? (receiving2 || null) : null},
+      ${IN ? supervisor : null}, ${IN ? null : recordedBy}, ${key}::uuid) AS result`;
     res.status(200).json(rows[0].result);
   } catch (e) {
     const msg = String(e.message || '');
