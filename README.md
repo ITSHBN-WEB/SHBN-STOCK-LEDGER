@@ -3,7 +3,9 @@
 ## Structure
 - `db/schema.sql`   table, `add_stock_entry()` (locked write), `ledger_json()` (dashboard data)
 - `api/`            Vercel serverless endpoints (`/api/ledger`, `/api/entries`)
+- `api/upload.js`   uploads one invoice photo/PDF to Vercel Blob
 - `lib/db.js`       Neon connection + optional passcode check
+- `lib/files.js`    invoice file rules (types, size, allowed links)
 - `public/index.html` frontend (Dashboard + Add Record)
 
 ## Setup (about 10 minutes)
@@ -23,3 +25,18 @@ Local test (optional): `npm i -g vercel`, copy `.env.example` to `.env`, run `ve
 - Balances are calculated from the entries, never stored, so they cannot drift.
 - Records are never deleted; corrections use `voided_at` (to be added as a screen later).
 - Database rejects lowercase supplier / invoice text even if someone bypasses the form.
+
+## Upgrading an existing deployment (v2: receiving details, record by, expandable days)
+1. Neon SQL Editor: paste the whole updated `db/schema.sql` and run it (safe to re-run; existing records are kept).
+2. Replace `api/entries.js` and `public/index.html` in GitHub with the new versions (upload > commit). Vercel redeploys by itself.
+
+## Upgrading to v3 (invoice photo / PDF upload on Instock)
+1. **Vercel > your project > Storage > Create > Blob.** Connect it to the project (all environments).
+   This adds `BLOB_READ_WRITE_TOKEN` automatically.
+2. Neon SQL Editor: paste the whole updated `db/schema.sql` and run it (safe to re-run).
+3. GitHub: upload the new/changed files: `package.json`, `api/entries.js`, `api/upload.js`,
+   `lib/files.js`, `public/index.html`, `db/schema.sql`. Vercel redeploys by itself.
+   (Redeploy once more if the Blob token was added after the last deployment.)
+
+Rules: 1 to 3 files per Instock record; photos are shrunk in the browser (about 300 to 600 KB);
+PDF max 3 MB; only JPG, PNG, PDF; only links from your own Blob store are accepted.
