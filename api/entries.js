@@ -9,7 +9,7 @@ const validDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && !Number.isNaN(Da
 
 // POST /api/entries
 //  Both: { date: 'YYYY-MM-DD' }  (date of the actual stock movement, chosen and confirmed by the user)
-//  IN : { type, quantity, supplier, brand, invoiceNo, invoiceAmount, receiving1, receiving2?, supervisor, files[1-3], key }
+//  IN : { type, quantity, supplier, brand, costPerCarton, invoiceNo, invoiceAmount, receiving1, receiving2?, supervisor, files[1-3], key }
 //  OUT: { type, quantity, recordedBy, key }
 export default async function handler(req, res) {
   if (!guard(req, res)) return;
@@ -31,6 +31,7 @@ export default async function handler(req, res) {
   if (type === 'IN') {
     if (!supplier) return res.status(400).json({ error: 'SUPPLIER IS REQUIRED' });
     if (!brand) return res.status(400).json({ error: 'BRAND / PRODUCT IS REQUIRED' });
+    if (!money(b.costPerCarton)) return res.status(400).json({ error: 'ENTER A VALID COST PER CARTON' });
     if (!invoiceNo) return res.status(400).json({ error: 'INVOICE NUMBER IS REQUIRED' });
     if (!money(b.invoiceAmount)) return res.status(400).json({ error: 'ENTER A VALID INVOICE AMOUNT' });
     if (!receiving1) return res.status(400).json({ error: 'RECEIVING 1 IS REQUIRED' });
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
     const rows = await sql`SELECT add_stock_entry(
       ${type}, ${Number(b.quantity)}, ${IN ? supplier : null}, ${IN ? invoiceNo : null},
       ${IN ? Number(b.invoiceAmount) : null}, ${IN ? receiving1 : null}, ${IN ? (receiving2 || null) : null},
-      ${IN ? supervisor : null}, ${IN ? null : recordedBy}, ${IN ? JSON.stringify(files) : null}::jsonb, ${IN ? brand : null}, ${date}::date, ${key}::uuid) AS result`;
+      ${IN ? supervisor : null}, ${IN ? null : recordedBy}, ${IN ? JSON.stringify(files) : null}::jsonb, ${IN ? brand : null}, ${IN ? Number(b.costPerCarton) : null}, ${date}::date, ${key}::uuid) AS result`;
     res.status(200).json(rows[0].result);
   } catch (e) {
     const msg = String(e.message || '');
