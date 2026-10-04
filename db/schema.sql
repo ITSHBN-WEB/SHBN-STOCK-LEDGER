@@ -26,6 +26,8 @@ ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS supervisor  TEXT;
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS recorded_by TEXT;
 -- v3 column: invoice photos/PDFs (max 3), stored as links: [{url,name,type,size}]
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS invoice_files JSONB;
+-- v4 column: brand / product name for instock
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS brand_product TEXT;
 
 -- Rules apply to NEW rows only (NOT VALID), so records saved before this upgrade never block it.
 ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS upper_only;
@@ -35,7 +37,8 @@ ALTER TABLE stock_entries ADD CONSTRAINT upper_only CHECK (
   (receiving_1 IS NULL OR receiving_1 = upper(receiving_1)) AND
   (receiving_2 IS NULL OR receiving_2 = upper(receiving_2)) AND
   (supervisor  IS NULL OR supervisor  = upper(supervisor))  AND
-  (recorded_by IS NULL OR recorded_by = upper(recorded_by))) NOT VALID;
+  (recorded_by IS NULL OR recorded_by = upper(recorded_by)) AND
+  (brand_product IS NULL OR brand_product = upper(brand_product))) NOT VALID;
 
 -- New records from the app must be complete; imported history may have gaps.
 ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS in_complete;
@@ -44,6 +47,7 @@ ALTER TABLE stock_entries ADD CONSTRAINT in_complete CHECK (
   (entry_type = 'IN'  AND coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> ''
                       AND invoice_amount IS NOT NULL
                       AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> ''
+                      AND coalesce(brand_product,'') <> ''
                       AND (CASE WHEN jsonb_typeof(invoice_files) = 'array'
                                 THEN jsonb_array_length(invoice_files) ELSE 0 END) BETWEEN 1 AND 3) OR
   (entry_type = 'OUT' AND coalesce(recorded_by,'') <> '')) NOT VALID;
@@ -56,18 +60,22 @@ CREATE INDEX IF NOT EXISTS stock_entries_date_idx ON stock_entries (entry_date) 
 
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO app_settings VALUES ('out_unit_price','2.50') ON CONFLICT DO NOTHING;  -- RM/KG, from Excel col K
+INSERT INTO app_settings VALUES ('max_backdate_days','31') ON CONFLICT DO NOTHING;  -- how far back a record may be dated
 
 -- The ONLY way the app writes. One call = one atomic transaction.
 DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, uuid);  -- v1 signature
 DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, uuid);  -- v2 signature
+DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, jsonb, uuid);  -- v3 signature
 CREATE OR REPLACE FUNCTION add_stock_entry(
   p_type text, p_qty numeric, p_supplier text, p_invoice_no text, p_invoice_amount numeric,
-  p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_files jsonb, p_key uuid
+  p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_files jsonb,
+  p_brand text, p_date date, p_key uuid
 ) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
-  v_row stock_entries; v_bal numeric; v_price numeric;
+  v_row stock_entries; v_bal numeric; v_price numeric; v_min numeric; v_max_back int;
+  v_today date := (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date;
 BEGIN
-  -- 1) Serialise all writers: concurrent users queue here, so the balance check below is never stale.
+  -- 1) Serialise all writers: concurrent users queue here, so the checks below are never stale.
   PERFORM pg_advisory_xact_lock(727001);
 
   -- 2) Idempotent retry: same key already saved -> return the original, do not insert again.
@@ -80,24 +88,44 @@ BEGIN
     END IF;
   END IF;
 
-  -- 3) Never let stock go negative.
+  -- 3) Date rules: chosen by the user, but never in the future and not older than the allowed window.
+  IF p_date IS NULL THEN RAISE EXCEPTION 'DATE_REQUIRED'; END IF;
+  SELECT COALESCE(value::int, 31) INTO v_max_back FROM app_settings WHERE key = 'max_backdate_days';
+  v_max_back := COALESCE(v_max_back, 31);
+  IF p_date > v_today THEN RAISE EXCEPTION 'DATE_IN_FUTURE'; END IF;
+  IF p_date < v_today - v_max_back THEN RAISE EXCEPTION 'DATE_TOO_OLD: max % days back', v_max_back; END IF;
+
   SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0)
     INTO v_bal FROM stock_entries WHERE voided_at IS NULL;
-  IF p_type = 'OUT' AND p_qty > v_bal THEN
-    RAISE EXCEPTION 'INSUFFICIENT_STOCK: only % KG available', v_bal;
+
+  -- 4) Never let stock go negative ON ANY DAY. A back-dated OUT lowers the balance of that day
+  --    and of every later day, so the lowest closing balance from that date onward must cover it.
+  IF p_type = 'OUT' THEN
+    WITH daily AS (
+      SELECT entry_date AS d, SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END) AS net
+      FROM stock_entries WHERE voided_at IS NULL GROUP BY entry_date
+    ), cum AS (SELECT d, SUM(net) OVER (ORDER BY d) AS c FROM daily)
+    SELECT LEAST(
+             COALESCE((SELECT c FROM cum WHERE d <= p_date ORDER BY d DESC LIMIT 1), 0),
+             COALESCE((SELECT MIN(c) FROM cum WHERE d > p_date), 1e15))
+      INTO v_min;
+    IF p_qty > v_min THEN
+      RAISE EXCEPTION 'INSUFFICIENT_STOCK: only % KG available', v_min;
+    END IF;
   END IF;
 
   SELECT value::numeric INTO v_price FROM app_settings WHERE key = 'out_unit_price';
 
   INSERT INTO stock_entries (entry_type, entry_date, quantity_kg, supplier, invoice_no, invoice_amount, unit_price,
-                             receiving_1, receiving_2, supervisor, recorded_by, invoice_files, idempotency_key)
-  VALUES (p_type, (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date, p_qty,
+                             receiving_1, receiving_2, supervisor, recorded_by, invoice_files, brand_product, idempotency_key)
+  VALUES (p_type, p_date, p_qty,
           upper(nullif(btrim(p_supplier),'')), upper(nullif(btrim(p_invoice_no),'')),
           CASE WHEN p_type = 'IN' THEN p_invoice_amount END,
           CASE WHEN p_type = 'OUT' THEN v_price END,
           upper(nullif(btrim(p_receiving_1),'')), upper(nullif(btrim(p_receiving_2),'')),
           upper(nullif(btrim(p_supervisor),'')),  upper(nullif(btrim(p_recorded_by),'')),
-          CASE WHEN p_type = 'IN' THEN p_files END, p_key)
+          CASE WHEN p_type = 'IN' THEN p_files END,
+          CASE WHEN p_type = 'IN' THEN upper(nullif(btrim(p_brand),'')) END, p_key)
   RETURNING * INTO v_row;
 
   v_bal := v_bal + CASE p_type WHEN 'IN' THEN p_qty ELSE -p_qty END;
@@ -132,12 +160,13 @@ SELECT jsonb_build_object(
   'balance', (SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0)
               FROM stock_entries WHERE voided_at IS NULL),
   'month_opening', (SELECT qty FROM opening),
+  'max_backdate_days', COALESCE((SELECT value::int FROM app_settings WHERE key = 'max_backdate_days'), 31),
   'days', COALESCE((SELECT jsonb_agg(jsonb_build_object('date', d, 'opening', closing - in_kg + out_kg,
                     'in', in_kg, 'out', out_kg, 'closing', closing) ORDER BY d) FROM ledger), '[]'::jsonb),
   'entries', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'type', entry_type, 'date', entry_date, 'ts', entry_ts,
                     'supplier', supplier, 'invoice_no', invoice_no, 'invoice_amount', invoice_amount,
                     'receiving_1', receiving_1, 'receiving_2', receiving_2, 'supervisor', supervisor,
-                    'recorded_by', recorded_by, 'files', invoice_files, 'qty', quantity_kg) ORDER BY entry_ts, id)
+                    'recorded_by', recorded_by, 'files', invoice_files, 'brand', brand_product, 'qty', quantity_kg) ORDER BY entry_ts, id)
               FROM stock_entries, bounds
               WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first), '[]'::jsonb)
 );
