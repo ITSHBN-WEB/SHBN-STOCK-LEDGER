@@ -1,173 +1,397 @@
--- Stock ledger schema for Neon (Postgres).
--- SAFE TO RE-RUN: works for a fresh install AND as an upgrade of an existing database.
--- Principle: append-only ledger. Balances are ALWAYS computed from entries, never stored,
--- so month-to-month carry-over can never drift or break (unlike the Excel M39/M40 links).
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STOCK LEDGER</title>
+<style>
+  :root { --ink:#fff; --muted:rgba(255,255,255,.72); --glass:rgba(255,255,255,.15); --line:rgba(255,255,255,.22); --in:#7ef0b0; --out:#ffb4b4; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; color:var(--ink); font-family:Arial,Helvetica,sans-serif; }
+  /* gradient on its own fixed layer: much cheaper to scroll than background-attachment:fixed */
+  body::before { content:''; position:fixed; inset:0; z-index:-1; background:linear-gradient(135deg,#1d4ed8 0%,#4f46e5 50%,#7e22ce 100%); }
+  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:18px; letter-spacing:.12em; margin:0 0 16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tab { flex:1; padding:12px; border:1px solid var(--line); background:var(--glass); color:var(--ink);
+         border-radius:10px; font-weight:700; letter-spacing:.08em; cursor:pointer; font-size:14px; }
+  .tab.active { background:#fff; color:#4338ca; }
+  .card { background:var(--glass); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+  .balance { text-align:center; }
+  .balance small { color:var(--muted); letter-spacing:.14em; font-size:12px; }
+  .balance .num { font-size:44px; font-weight:700; margin-top:4px; }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  input, button.save { font:inherit; }
+  input[type=month], input[type=text], input[type=password] { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line);
+         background:rgba(255,255,255,.95); color:#1e1b4b; font-size:16px; text-transform:uppercase; }
+  input[type=month] { width:auto; text-transform:none; }
+  input[type=date] { flex:1; min-width:0; padding:12px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.95); color:#1e1b4b; font-size:16px; }
+  .daterow { display:flex; gap:10px; align-items:stretch; }
+  .daterow button { flex:none; width:auto; padding:0 16px; }
+  .datenote { margin-top:8px; font-size:13px; font-weight:700; letter-spacing:.05em; }
+  .datenote.late { color:#ffd27a; }
+  .datebar { display:flex; justify-content:space-between; align-items:center; gap:10px; background:rgba(0,0,0,.2); border-radius:10px; padding:10px 12px; margin-top:12px; font-size:14px; }
+  .datebar.late { outline:1px solid #ffd27a; }
+  .datebar button { border:1px solid var(--line); background:transparent; color:var(--ink); border-radius:8px; padding:6px 10px; font:inherit; font-size:12px; font-weight:700; letter-spacing:.06em; cursor:pointer; }
+  .late-tag { background:#ffd27a; color:#3b2a00; }
+  label { display:block; font-size:12px; letter-spacing:.1em; color:var(--muted); margin:12px 0 6px; }
+  button.save { width:100%; margin-top:18px; padding:14px; border:0; border-radius:10px; background:#fff; color:#4338ca;
+         font-weight:700; letter-spacing:.1em; font-size:15px; cursor:pointer; }
+  button.save:disabled { opacity:.5; cursor:wait; }
+  .sub { display:flex; gap:8px; margin-bottom:6px; }
+  .sub .tab { padding:9px; font-size:13px; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; min-width:520px; }
+  th { text-align:right; font-size:11px; letter-spacing:.1em; color:var(--muted); padding:8px; border-bottom:1px solid var(--line); }
+  td { text-align:right; padding:8px; border-bottom:1px solid rgba(255,255,255,.1); font-variant-numeric:tabular-nums; }
+  th:first-child, td:first-child { text-align:left; }
+  td.in { color:var(--in); } td.out { color:var(--out); }
+  .badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:99px; background:rgba(255,255,255,.18); }
+  .msg { margin-top:12px; padding:10px 12px; border-radius:10px; font-size:14px; display:none; }
+  .msg.ok { display:block; background:rgba(126,240,176,.2); } .msg.err { display:block; background:rgba(255,120,120,.28); }
+  .hidden { display:none; } .muted { color:var(--muted); font-size:13px; }
+  h2 { font-size:13px; letter-spacing:.12em; margin:0 0 10px; }
+  .actions { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-top:18px; }
+  .actions button.save { margin-top:0; }
+  button.clear { padding:14px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--ink);
+         font:inherit; font-weight:700; letter-spacing:.1em; font-size:15px; cursor:pointer; }
+  .group { margin-top:20px; padding-top:4px; border-top:1px solid var(--line); font-size:12px; font-weight:700; letter-spacing:.12em; color:var(--muted); }
+  .group + label { margin-top:8px; }
+  .opt { text-transform:none; letter-spacing:0; opacity:.8; }
+  button.exp { width:34px; height:30px; border-radius:8px; border:1px solid var(--line); background:var(--glass); color:var(--ink); cursor:pointer; font-size:14px; }
+  button.exp:disabled { opacity:.25; cursor:default; }
+  tr.detail > td { padding:0 8px 12px; text-align:left; }
+  .det { background:rgba(0,0,0,.18); border-radius:10px; padding:10px 12px; margin-top:8px; text-align:left; }
+  .det-h { display:flex; justify-content:space-between; gap:8px; font-size:13px; margin-bottom:8px; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 14px; font-size:13px; }
+  .kv span { display:block; font-size:10px; letter-spacing:.1em; color:var(--muted); }
+  .kv b { font-weight:700; word-break:break-word; }
+  .lnk { color:#fff; font-weight:700; text-decoration:underline; margin-right:12px; white-space:nowrap; }
+  .frow { display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.12); border-radius:10px; padding:8px 10px; margin-top:8px; font-size:13px; }
+  .frow img, .frow .pdf { width:40px; height:40px; border-radius:6px; flex:none; object-fit:cover; }
+  .frow .pdf { display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.25); font-size:11px; font-weight:700; }
+  .frow .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .frow button { border:0; background:rgba(0,0,0,.25); color:#fff; border-radius:8px; width:30px; height:30px; cursor:pointer; font-size:14px; }
+  button.pick { width:100%; padding:12px; border-radius:10px; border:1px dashed rgba(255,255,255,.6); background:transparent; color:#fff; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
+  @media print { body { color:#000; } body::before { background:#fff; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>STOCK LEDGER &mdash; MINYAK PAKET 1KG</h1>
+  <div class="tabs">
+    <button class="tab active" data-tab="dash">DASHBOARD</button>
+    <button class="tab" data-tab="add">ADD RECORD</button>
+  </div>
 
-CREATE TABLE IF NOT EXISTS stock_entries (
-  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  entry_type      TEXT          NOT NULL CHECK (entry_type IN ('IN','OUT')),
-  entry_date      DATE          NOT NULL,                 -- business day, Asia/Kuala_Lumpur
-  entry_ts        TIMESTAMPTZ   NOT NULL DEFAULT now(),   -- exact time of the record
-  quantity_kg     NUMERIC(12,2) NOT NULL CHECK (quantity_kg > 0),
-  supplier        TEXT,
-  invoice_no      TEXT,
-  invoice_amount  NUMERIC(12,2) CHECK (invoice_amount >= 0),
-  unit_price      NUMERIC(8,2),                           -- OUT only: RM per KG at time of sale
-  idempotency_key UUID UNIQUE,                            -- blocks double-click / retry duplicates
-  source          TEXT          NOT NULL DEFAULT 'APP' CHECK (source IN ('APP','EXCEL_IMPORT')),
-  voided_at       TIMESTAMPTZ,                            -- corrections = void, never DELETE
-  void_reason     TEXT
-);
+  <!-- DASHBOARD -->
+  <section id="dash">
+    <div class="card balance"><small>CURRENT BALANCE STOCK</small><div class="num"><span id="bal">-</span> KG</div></div>
+    <div class="card">
+      <div class="toolbar"><h2 style="margin:0">DAILY RECORD</h2><input type="month" id="month"></div>
+      <div class="scroll"><table>
+        <thead><tr><th>DATE</th><th>OPENING (KG)</th><th>IN (KG)</th><th>OUT (KG)</th><th>BALANCE (KG)</th><th></th></tr></thead>
+        <tbody id="days"></tbody></table></div>
+    </div>
+  </section>
 
--- v2 columns: receiving details (IN) and record-by (OUT)
-ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS receiving_1 TEXT;
-ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS receiving_2 TEXT;
-ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS supervisor  TEXT;
-ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS recorded_by TEXT;
--- v3 column: invoice photos/PDFs (max 3), stored as links: [{url,name,type,size}]
-ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS invoice_files JSONB;
--- v4 column: brand / product name for instock
-ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS brand_product TEXT;
+  <!-- ADD RECORD -->
+  <section id="add" class="hidden">
+    <div class="card">
+      <div class="sub">
+        <button class="tab active" data-sub="in">INSTOCK</button>
+        <button class="tab" data-sub="out">OUTSTOCK</button>
+      </div>
 
--- Rules apply to NEW rows only (NOT VALID), so records saved before this upgrade never block it.
-ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS upper_only;
-ALTER TABLE stock_entries ADD CONSTRAINT upper_only CHECK (
-  (supplier    IS NULL OR supplier    = upper(supplier))    AND
-  (invoice_no  IS NULL OR invoice_no  = upper(invoice_no))  AND
-  (receiving_1 IS NULL OR receiving_1 = upper(receiving_1)) AND
-  (receiving_2 IS NULL OR receiving_2 = upper(receiving_2)) AND
-  (supervisor  IS NULL OR supervisor  = upper(supervisor))  AND
-  (recorded_by IS NULL OR recorded_by = upper(recorded_by)) AND
-  (brand_product IS NULL OR brand_product = upper(brand_product))) NOT VALID;
+      <div id="sub-in">
+        <div id="dp-in">
+          <label>DATE STOCK RECEIVED</label>
+          <div class="daterow"><input type="date" id="d-in"><button type="button" class="pick" id="dc-in">CONFIRM DATE</button></div>
+          <div class="datenote" id="dn-in"></div>
+        </div>
+        <div id="db-in" class="datebar hidden"><div>DATE: <b id="dv-in"></b></div><button type="button" id="dx-in">CHANGE DATE</button></div>
+        <div id="fields-in" class="hidden">
+        <label>INVOICE FILE <span class="opt">(PHOTO OR PDF, 1 TO 3 FILES)</span></label>
+        <input type="file" id="files" accept="image/*,application/pdf" multiple class="hidden">
+        <button type="button" class="pick" id="pick">+ ADD PHOTO / PDF</button>
+        <div id="filelist"></div>
+        <label>SUPPLIER</label><input type="text" id="supplier" autocomplete="off">
+        <label>BRAND / PRODUCT</label><input type="text" id="brand" autocomplete="off">
+        <label>INVOICE NUMBER</label><input type="text" id="invno" autocomplete="off">
+        <label>INVOICE AMOUNT</label><input type="text" id="amount" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
+        <label>QUANTITY (KG)</label><input type="text" id="qty-in" inputmode="decimal" autocomplete="off">
+        <div class="group">RECEIVING DETAILS</div>
+        <label>RECEIVING 1</label><input type="text" id="rcv1" class="caps" autocomplete="off">
+        <label>RECEIVING 2 <span class="opt">(OPTIONAL)</span></label><input type="text" id="rcv2" class="caps" autocomplete="off">
+        <label>SUPERVISOR</label><input type="text" id="sup" class="caps" autocomplete="off">
+        <div class="actions"><button class="clear" id="clear-in" type="button">CLEAR</button><button class="save" id="save-in">SAVE INSTOCK</button></div>
+        </div>
+        <div class="msg" id="msg-in"></div>
+      </div>
 
--- New records from the app must be complete; imported history may have gaps.
-ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS in_complete;
-ALTER TABLE stock_entries ADD CONSTRAINT in_complete CHECK (
-  source <> 'APP' OR
-  (entry_type = 'IN'  AND coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> ''
-                      AND invoice_amount IS NOT NULL
-                      AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> ''
-                      AND coalesce(brand_product,'') <> ''
-                      AND (CASE WHEN jsonb_typeof(invoice_files) = 'array'
-                                THEN jsonb_array_length(invoice_files) ELSE 0 END) BETWEEN 1 AND 3) OR
-  (entry_type = 'OUT' AND coalesce(recorded_by,'') <> '')) NOT VALID;
+      <div id="sub-out" class="hidden">
+        <div id="dp-out">
+          <label>DATE STOCK TAKEN OUT</label>
+          <div class="daterow"><input type="date" id="d-out"><button type="button" class="pick" id="dc-out">CONFIRM DATE</button></div>
+          <div class="datenote" id="dn-out"></div>
+        </div>
+        <div id="db-out" class="datebar hidden"><div>DATE: <b id="dv-out"></b></div><button type="button" id="dx-out">CHANGE DATE</button></div>
+        <div id="fields-out" class="hidden">
+        <label>QUANTITY (KG)</label><input type="text" id="qty-out" inputmode="decimal" autocomplete="off">
+        <label>RECORD BY</label><input type="text" id="recby" class="caps" autocomplete="off">
+        <div class="actions"><button class="clear" id="clear-out" type="button">CLEAR</button><button class="save" id="save-out">SAVE OUTSTOCK</button></div>
+        </div>
+        <div class="msg" id="msg-out"></div>
+      </div>
+    </div>
+  </section>
+</div>
 
-ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS invoice_files_ok;
-ALTER TABLE stock_entries ADD CONSTRAINT invoice_files_ok CHECK (
-  invoice_files IS NULL OR (jsonb_typeof(invoice_files) = 'array' AND jsonb_array_length(invoice_files) <= 3)) NOT VALID;
+<script>
+const $ = (id) => document.getElementById(id);
+const TZ = 'Asia/Kuala_Lumpur';
+const fmt = (n) => Number(n).toLocaleString('en-MY', { maximumFractionDigits: 2 });
+const rm  = (n) => n == null ? '' : Number(n).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-CREATE INDEX IF NOT EXISTS stock_entries_date_idx ON stock_entries (entry_date) WHERE voided_at IS NULL;
+// ---- API (with optional passcode) ----
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', 'x-passcode': sessionStorage.getItem('pc') || '' };
+  let res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    const pc = prompt('ENTER PASSCODE');
+    if (pc === null) throw new Error('PASSCODE REQUIRED');
+    sessionStorage.setItem('pc', pc);
+    headers['x-passcode'] = pc;
+    res = await fetch(path, { ...opts, headers });
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'REQUEST FAILED');
+  return data;
+}
 
-CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT INTO app_settings VALUES ('out_unit_price','2.50') ON CONFLICT DO NOTHING;  -- RM/KG, from Excel col K
-INSERT INTO app_settings VALUES ('max_backdate_days','31') ON CONFLICT DO NOTHING;  -- how far back a record may be dated
+// ---- Tabs ----
+document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
+  $('dash').classList.toggle('hidden', b.dataset.tab !== 'dash');
+  $('add').classList.toggle('hidden', b.dataset.tab !== 'add');
+  if (b.dataset.tab === 'dash') loadLedger();
+});
+document.querySelectorAll('[data-sub]').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('[data-sub]').forEach((x) => x.classList.toggle('active', x === b));
+  $('sub-in').classList.toggle('hidden', b.dataset.sub !== 'in');
+  $('sub-out').classList.toggle('hidden', b.dataset.sub !== 'out');
+});
 
--- The ONLY way the app writes. One call = one atomic transaction.
-DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, uuid);  -- v1 signature
-DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, uuid);  -- v2 signature
-DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, jsonb, uuid);  -- v3 signature
-CREATE OR REPLACE FUNCTION add_stock_entry(
-  p_type text, p_qty numeric, p_supplier text, p_invoice_no text, p_invoice_amount numeric,
-  p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_files jsonb,
-  p_brand text, p_date date, p_key uuid
-) RETURNS jsonb LANGUAGE plpgsql AS $$
-DECLARE
-  v_row stock_entries; v_bal numeric; v_price numeric; v_min numeric; v_max_back int;
-  v_today date := (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date;
-BEGIN
-  -- 1) Serialise all writers: concurrent users queue here, so the checks below are never stale.
-  PERFORM pg_advisory_xact_lock(727001);
+// ---- Dashboard ----
+const nowMY = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+$('month').value = nowMY.slice(0, 7);
+$('month').onchange = loadLedger;
 
-  -- 2) Idempotent retry: same key already saved -> return the original, do not insert again.
-  IF p_key IS NOT NULL THEN
-    SELECT * INTO v_row FROM stock_entries WHERE idempotency_key = p_key;
-    IF FOUND THEN
-      SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0)
-        INTO v_bal FROM stock_entries WHERE voided_at IS NULL;
-      RETURN jsonb_build_object('entry', to_jsonb(v_row), 'balance', v_bal, 'duplicate', true);
-    END IF;
-  END IF;
+const open = new Set();               // expanded days survive refresh
+let lastData = null;
+const timeOf = (ts) => new Date(ts).toLocaleTimeString('en-MY', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase();
+const kv = (k, v) => `<div><span>${k}</span><b>${v ? esc(String(v)) : '-'}</b></div>`;
+const fileLinks = (e) => (e.files || []).filter((f) => String(f.url).startsWith('https://'))
+  .map((f, i) => `<a class="lnk" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name || '')}">${f.type === 'application/pdf' ? 'PDF' : 'PHOTO'} ${i + 1}</a>`).join('');
 
-  -- 3) Date rules: chosen by the user, but never in the future and not older than the allowed window.
-  IF p_date IS NULL THEN RAISE EXCEPTION 'DATE_REQUIRED'; END IF;
-  SELECT COALESCE(value::int, 31) INTO v_max_back FROM app_settings WHERE key = 'max_backdate_days';
-  v_max_back := COALESCE(v_max_back, 31);
-  IF p_date > v_today THEN RAISE EXCEPTION 'DATE_IN_FUTURE'; END IF;
-  IF p_date < v_today - v_max_back THEN RAISE EXCEPTION 'DATE_TOO_OLD: max % days back', v_max_back; END IF;
+const dmy = (iso) => iso.split('-').reverse().join('/');
+function detailHTML(e) {
+  const recDay = new Date(e.ts).toLocaleDateString('en-CA', { timeZone: TZ });
+  const late = recDay !== e.date;                       // recorded on a later day than the movement
+  const lateKv = late ? kv('RECORDED ON', dmy(recDay) + ' ' + timeOf(e.ts)) : '';
+  const head = `<div class="det-h"><div><span class="badge">${e.type}</span> ${late ? '<span class="badge late-tag">LATE ENTRY</span>' : '&nbsp;' + timeOf(e.ts)}</div>
+    <b class="${e.type === 'IN' ? 'in' : 'out'}">${e.type === 'IN' ? '+' : '-'}${fmt(e.qty)} KG</b></div>`;
+  const body = e.type === 'IN'
+    ? kv('SUPPLIER', e.supplier) + kv('BRAND / PRODUCT', e.brand) + kv('INVOICE NO.', e.invoice_no) + kv('INVOICE AMOUNT', e.invoice_amount == null ? '' : 'RM ' + rm(e.invoice_amount))
+      + kv('RECEIVING 1', e.receiving_1) + kv('RECEIVING 2', e.receiving_2) + kv('SUPERVISOR', e.supervisor)
+      + `<div><span>INVOICE FILES</span><b>${fileLinks(e) || '-'}</b></div>` + lateKv
+    : kv('TIMESTAMP', new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase())
+      + kv('RECORD BY', e.recorded_by) + lateKv;
+  return `<div class="det">${head}<div class="kv">${body}</div></div>`;
+}
 
-  SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0)
-    INTO v_bal FROM stock_entries WHERE voided_at IS NULL;
+function renderLedger() {
+  const d = lastData; if (!d) return;
+  $('bal').textContent = fmt(d.balance);
+  const byDay = {};
+  d.entries.forEach((e) => (byDay[e.date] = byDay[e.date] || []).push(e));
+  $('days').innerHTML = d.days.map((r) => {
+    const list = byDay[r.date] || [], isOpen = open.has(r.date);
+    return `<tr><td>${r.date.split('-').reverse().join('/')}</td><td>${fmt(r.opening)}</td>
+      <td class="in">${r.in ? '+' + fmt(r.in) : '-'}</td><td class="out">${r.out ? '-' + fmt(r.out) : '-'}</td><td><b>${fmt(r.closing)}</b></td>
+      <td><button class="exp" data-d="${r.date}" ${list.length ? '' : 'disabled'} title="${list.length ? 'SHOW / HIDE DETAILS' : 'NO RECORDS'}">${isOpen && list.length ? '&#9662;' : '&#9656;'}</button></td></tr>`
+      + (isOpen && list.length ? `<tr class="detail"><td colspan="6">${list.map(detailHTML).join('')}</td></tr>` : '');
+  }).join('') || '<tr><td colspan="6" class="muted">NO DAYS TO SHOW</td></tr>';
+}
+$('days').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button.exp'); if (!b || b.disabled) return;
+  open.has(b.dataset.d) ? open.delete(b.dataset.d) : open.add(b.dataset.d);
+  renderLedger();
+});
 
-  -- 4) Never let stock go negative ON ANY DAY. A back-dated OUT lowers the balance of that day
-  --    and of every later day, so the lowest closing balance from that date onward must cover it.
-  IF p_type = 'OUT' THEN
-    WITH daily AS (
-      SELECT entry_date AS d, SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END) AS net
-      FROM stock_entries WHERE voided_at IS NULL GROUP BY entry_date
-    ), cum AS (SELECT d, SUM(net) OVER (ORDER BY d) AS c FROM daily)
-    SELECT LEAST(
-             COALESCE((SELECT c FROM cum WHERE d <= p_date ORDER BY d DESC LIMIT 1), 0),
-             COALESCE((SELECT MIN(c) FROM cum WHERE d > p_date), 1e15))
-      INTO v_min;
-    IF p_qty > v_min THEN
-      RAISE EXCEPTION 'INSUFFICIENT_STOCK: only % KG available', v_min;
-    END IF;
-  END IF;
+async function loadLedger() {
+  try {
+    lastData = await api('/api/ledger?month=' + $('month').value);
+    maxBack = lastData.max_backdate_days || 31; ['in', 'out'].forEach(limits);
+    renderLedger();
+  } catch (e) { $('bal').textContent = '!'; alert(e.message); }
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  SELECT value::numeric INTO v_price FROM app_settings WHERE key = 'out_unit_price';
+// ---- Inputs: ALL CAPS, quantity, RM 1,234.56 ----
+['supplier', 'brand', 'invno', 'rcv1', 'rcv2', 'sup', 'recby'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+['qty-in', 'qty-out'].forEach((id) => $(id).addEventListener('input', (e) => {
+  let v = e.target.value.replace(/[^\d.]/g, ''); const p = v.split('.');
+  e.target.value = p.length > 1 ? p[0] + '.' + p.slice(1).join('').slice(0, 2) : v;
+}));
+function maskRM(raw) {
+  let v = raw.replace(/[^\d.]/g, ''); if (!v) return '';
+  const p = v.split('.'); let int = p[0].replace(/^0+(?=\d)/, '');
+  int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return 'RM ' + int + (p.length > 1 ? '.' + p.slice(1).join('').slice(0, 2) : '');
+}
+$('amount').addEventListener('input', (e) => { e.target.value = maskRM(e.target.value); });
+$('amount').addEventListener('blur', (e) => {
+  if (!e.target.value) return;
+  const [i, d = ''] = e.target.value.replace('RM ', '').split('.');
+  e.target.value = 'RM ' + (i || '0') + '.' + (d + '00').slice(0, 2);
+});
+const amountValue = () => $('amount').value.replace(/[^\d.]/g, '');
 
-  INSERT INTO stock_entries (entry_type, entry_date, quantity_kg, supplier, invoice_no, invoice_amount, unit_price,
-                             receiving_1, receiving_2, supervisor, recorded_by, invoice_files, brand_product, idempotency_key)
-  VALUES (p_type, p_date, p_qty,
-          upper(nullif(btrim(p_supplier),'')), upper(nullif(btrim(p_invoice_no),'')),
-          CASE WHEN p_type = 'IN' THEN p_invoice_amount END,
-          CASE WHEN p_type = 'OUT' THEN v_price END,
-          upper(nullif(btrim(p_receiving_1),'')), upper(nullif(btrim(p_receiving_2),'')),
-          upper(nullif(btrim(p_supervisor),'')),  upper(nullif(btrim(p_recorded_by),'')),
-          CASE WHEN p_type = 'IN' THEN p_files END,
-          CASE WHEN p_type = 'IN' THEN upper(nullif(btrim(p_brand),'')) END, p_key)
-  RETURNING * INTO v_row;
+// ---- Save (idempotency key per form: a double-click or retry can never duplicate) ----
+// ---- Date step: pick the date of the actual movement, then CONFIRM before any other box appears ----
+let maxBack = 31;
+const todayMY = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+const shiftDay = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const daysAgo = (iso) => Math.round((Date.parse(todayMY() + 'T00:00:00Z') - Date.parse(iso + 'T00:00:00Z')) / 864e5);
+const agoText = (iso) => { const n = daysAgo(iso); return n === 0 ? 'TODAY' : n === 1 ? 'YESTERDAY' : n + ' DAYS AGO'; };
+const confirmed = { in: null, out: null };
 
-  v_bal := v_bal + CASE p_type WHEN 'IN' THEN p_qty ELSE -p_qty END;
-  RETURN jsonb_build_object('entry', to_jsonb(v_row), 'balance', v_bal, 'duplicate', false);
-END $$;
+function limits(k) { const i = $('d-' + k); i.max = todayMY(); i.min = shiftDay(todayMY(), -maxBack); }
+function note(k) {
+  const v = $('d-' + k).value, ok = v && v <= todayMY() && v >= shiftDay(todayMY(), -maxBack);
+  $('dc-' + k).disabled = !ok;
+  $('dn-' + k).className = 'datenote' + (ok && daysAgo(v) > 0 ? ' late' : '');
+  $('dn-' + k).textContent = !v ? 'SELECT A DATE' : !ok ? `DATE MUST BE WITHIN THE LAST ${maxBack} DAYS (NOT IN THE FUTURE)`
+    : daysAgo(v) === 0 ? 'TODAY. PRESS CONFIRM TO CONTINUE' : `LATE ENTRY: ${agoText(v)}. CHECK BEFORE CONFIRMING`;
+  $('dc-' + k).textContent = ok ? `CONFIRM ${dmy(v)}` : 'CONFIRM DATE';
+}
+function startDate(k) {                       // back to step 1: today pre-selected, but NOT confirmed
+  confirmed[k] = null; limits(k); $('d-' + k).value = todayMY(); note(k);
+  $('dp-' + k).classList.remove('hidden'); $('db-' + k).classList.add('hidden'); $('fields-' + k).classList.add('hidden');
+}
+function confirmDate(k) {
+  const v = $('d-' + k).value; limits(k); note(k); if ($('dc-' + k).disabled) return;
+  confirmed[k] = v; const late = daysAgo(v) > 0;
+  $('dv-' + k).textContent = `${dmy(v)} (${agoText(v)})`;
+  $('db-' + k).classList.toggle('late', late);
+  $('dp-' + k).classList.add('hidden'); $('db-' + k).classList.remove('hidden'); $('fields-' + k).classList.remove('hidden');
+}
+['in', 'out'].forEach((k) => {
+  $('d-' + k).addEventListener('input', () => note(k));
+  $('dc-' + k).onclick = () => confirmDate(k);
+  $('dx-' + k).onclick = () => { $('dp-' + k).classList.remove('hidden'); $('db-' + k).classList.add('hidden'); $('fields-' + k).classList.add('hidden'); $('d-' + k).value = confirmed[k]; confirmed[k] = null; note(k); };
+  startDate(k);
+});
 
--- Dashboard payload in ONE statement (consistent snapshot): current balance, daily ledger, entries.
--- Day logic = your Excel: opening(day) = closing(previous day); 1st of month = last day of previous month.
-CREATE OR REPLACE FUNCTION ledger_json(p_month date) RETURNS jsonb LANGUAGE sql STABLE AS $$
-WITH bounds AS (
-  SELECT date_trunc('month', p_month)::date AS first_day,
-         (date_trunc('month', p_month) + interval '1 month')::date AS next_first,
-         LEAST((date_trunc('month', p_month) + interval '1 month')::date - 1,
-               (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date) AS last_day
-), opening AS (
-  SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0) AS qty
-  FROM stock_entries, bounds WHERE voided_at IS NULL AND entry_date < first_day
-), per_day AS (
-  SELECT entry_date,
-         SUM(CASE WHEN entry_type='IN'  THEN quantity_kg ELSE 0 END) AS in_kg,
-         SUM(CASE WHEN entry_type='OUT' THEN quantity_kg ELSE 0 END) AS out_kg
-  FROM stock_entries, bounds
-  WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first GROUP BY entry_date
-), days AS (
-  SELECT g::date AS d FROM bounds, generate_series(first_day, last_day, interval '1 day') g
-), ledger AS (
-  SELECT d, COALESCE(in_kg,0) AS in_kg, COALESCE(out_kg,0) AS out_kg,
-         (SELECT qty FROM opening) + SUM(COALESCE(in_kg,0) - COALESCE(out_kg,0)) OVER (ORDER BY d) AS closing
-  FROM days LEFT JOIN per_day ON entry_date = d
-)
-SELECT jsonb_build_object(
-  'balance', (SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0)
-              FROM stock_entries WHERE voided_at IS NULL),
-  'month_opening', (SELECT qty FROM opening),
-  'max_backdate_days', COALESCE((SELECT value::int FROM app_settings WHERE key = 'max_backdate_days'), 31),
-  'days', COALESCE((SELECT jsonb_agg(jsonb_build_object('date', d, 'opening', closing - in_kg + out_kg,
-                    'in', in_kg, 'out', out_kg, 'closing', closing) ORDER BY d) FROM ledger), '[]'::jsonb),
-  'entries', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'type', entry_type, 'date', entry_date, 'ts', entry_ts,
-                    'supplier', supplier, 'invoice_no', invoice_no, 'invoice_amount', invoice_amount,
-                    'receiving_1', receiving_1, 'receiving_2', receiving_2, 'supervisor', supervisor,
-                    'recorded_by', recorded_by, 'files', invoice_files, 'brand', brand_product, 'qty', quantity_kg) ORDER BY entry_ts, id)
-              FROM stock_entries, bounds
-              WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first), '[]'::jsonb)
-);
-$$;
+let keyIn = crypto.randomUUID(), keyOut = crypto.randomUUID();
+function show(id, ok, text) { const m = $(id); m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = text; }
+
+async function submit(btnId, msgId, payload, onDone) {
+  const btn = $(btnId); btn.disabled = true;
+  try {
+    const r = await api('/api/entries', { method: 'POST', body: JSON.stringify(payload) });
+    show(msgId, true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
+    onDone();
+  } catch (e) { show(msgId, false, e.message); }
+  finally { btn.disabled = false; }
+}
+// ---- Invoice files: pick (max 3), shrink photos in the browser, upload before saving ----
+const MAX_FILES = 3, PDF_MAX = 3_000_000, IMG_MAX = 1_400_000;
+let picked = [];   // { name, type, blob, thumb, uploaded }
+
+async function shrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('CANNOT READ IMAGE. USE JPG, PNG OR PDF')); i.src = url; });
+    let scale = Math.min(1, 1800 / Math.max(img.width, img.height));
+    for (const q of [0.78, 0.65, 0.5]) {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+      if (blob && blob.size <= IMG_MAX) return blob;
+      scale *= 0.8;
+    }
+    throw new Error('IMAGE TOO LARGE');
+  } finally { URL.revokeObjectURL(url); }
+}
+const toBase64 = (blob) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(blob); });
+
+function renderFiles() {
+  $('filelist').innerHTML = picked.map((p, i) => `<div class="frow">
+    ${p.thumb ? `<img src="${p.thumb}" alt="">` : '<div class="pdf">PDF</div>'}
+    <div class="nm">${esc(p.name)}<br><span class="muted">${Math.max(1, Math.round(p.blob.size / 1024))} KB</span></div>
+    <button type="button" data-i="${i}" title="REMOVE">&#10005;</button></div>`).join('');
+  $('pick').textContent = picked.length >= MAX_FILES ? 'MAXIMUM 3 FILES' : '+ ADD PHOTO / PDF';
+  $('pick').disabled = picked.length >= MAX_FILES;
+}
+function resetFiles() { picked.forEach((p) => p.thumb && URL.revokeObjectURL(p.thumb)); picked = []; renderFiles(); }
+$('pick').onclick = () => $('files').click();
+$('filelist').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-i]'); if (!b) return;
+  const [p] = picked.splice(Number(b.dataset.i), 1); if (p.thumb) URL.revokeObjectURL(p.thumb); renderFiles();
+});
+$('files').addEventListener('change', async (ev) => {
+  const list = [...ev.target.files]; ev.target.value = '';
+  const errs = [];
+  for (const f of list) {
+    if (picked.length >= MAX_FILES) { errs.push('MAXIMUM 3 FILES'); break; }
+    try {
+      if (f.type === 'application/pdf') {
+        if (f.size > PDF_MAX) throw new Error(`${f.name}: PDF TOO LARGE (MAX 3 MB)`);
+        picked.push({ name: f.name, type: 'application/pdf', blob: f, thumb: null, uploaded: null });
+      } else if (f.type.startsWith('image/')) {
+        const blob = await shrink(f);
+        picked.push({ name: f.name.replace(/\.\w+$/, '') + '.jpg', type: 'image/jpeg', blob, thumb: URL.createObjectURL(blob), uploaded: null });
+      } else throw new Error(`${f.name}: ONLY PHOTO OR PDF`);
+    } catch (e) { errs.push(e.message); }
+    renderFiles();
+  }
+  if (errs.length) show('msg-in', false, errs.join(' | '));
+});
+
+const clearIn  = () => { ['supplier', 'brand', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); resetFiles(); };
+const clearOut = () => { ['qty-out', 'recby'].forEach((i) => $(i).value = ''); };
+$('clear-in').onclick  = () => { clearIn();  $('msg-in').className = 'msg'; startDate('in'); };
+$('clear-out').onclick = () => { clearOut(); $('msg-out').className = 'msg'; startDate('out'); };
+
+$('save-in').onclick = async () => {
+  const v = (id) => $(id).value.trim();
+  const need = !confirmed.in ? 'CONFIRM THE DATE FIRST' : !picked.length ? 'ATTACH AT LEAST 1 INVOICE FILE' : !v('supplier') ? 'SUPPLIER IS REQUIRED' : !v('brand') ? 'BRAND / PRODUCT IS REQUIRED' : !v('invno') ? 'INVOICE NUMBER IS REQUIRED'
+    : !amountValue() ? 'ENTER A VALID INVOICE AMOUNT' : !Number(v('qty-in')) ? 'ENTER A VALID QUANTITY (KG)'
+    : !v('rcv1') ? 'RECEIVING 1 IS REQUIRED' : !v('sup') ? 'SUPERVISOR IS REQUIRED' : '';
+  if (need) return show('msg-in', false, need);        // check BEFORE uploading, so no stray files are stored
+  const btn = $('save-in'); btn.disabled = true;
+  try {
+    for (let i = 0; i < picked.length; i++) {
+      const p = picked[i]; if (p.uploaded) continue;      // already uploaded on an earlier attempt
+      show('msg-in', true, `UPLOADING FILE ${i + 1} OF ${picked.length}...`);
+      p.uploaded = await api('/api/upload', { method: 'POST', body: JSON.stringify({ name: p.name, type: p.type, data: await toBase64(p.blob) }) });
+    }
+    const r = await api('/api/entries', { method: 'POST', body: JSON.stringify({
+      type: 'IN', date: confirmed.in, supplier: v('supplier'), brand: v('brand'), invoiceNo: v('invno'), invoiceAmount: amountValue(), quantity: v('qty-in'),
+      receiving1: v('rcv1'), receiving2: v('rcv2'), supervisor: v('sup'), files: picked.map((p) => p.uploaded), key: keyIn }) });
+    show('msg-in', true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
+    clearIn(); startDate('in'); keyIn = crypto.randomUUID();
+  } catch (e) { show('msg-in', false, e.message); }
+  finally { btn.disabled = false; }
+};
+$('save-out').onclick = () => !confirmed.out ? show('msg-out', false, 'CONFIRM THE DATE FIRST') : submit('save-out', 'msg-out',
+  { type: 'OUT', date: confirmed.out, quantity: $('qty-out').value, recordedBy: $('recby').value, key: keyOut },
+  () => { clearOut(); startDate('out'); keyOut = crypto.randomUUID(); });
+
+loadLedger();
+</script>
+</body>
+</html>
