@@ -28,6 +28,8 @@ ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS recorded_by TEXT;
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS invoice_files JSONB;
 -- v4 column: brand / product name for instock
 ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS brand_product TEXT;
+-- v5 column: cost per carton (RM) for instock
+ALTER TABLE stock_entries ADD COLUMN IF NOT EXISTS cost_per_carton NUMERIC(12,2) CHECK (cost_per_carton >= 0);
 
 -- Rules apply to NEW rows only (NOT VALID), so records saved before this upgrade never block it.
 ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS upper_only;
@@ -47,7 +49,7 @@ ALTER TABLE stock_entries ADD CONSTRAINT in_complete CHECK (
   (entry_type = 'IN'  AND coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> ''
                       AND invoice_amount IS NOT NULL
                       AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> ''
-                      AND coalesce(brand_product,'') <> ''
+                      AND coalesce(brand_product,'') <> '' AND cost_per_carton IS NOT NULL
                       AND (CASE WHEN jsonb_typeof(invoice_files) = 'array'
                                 THEN jsonb_array_length(invoice_files) ELSE 0 END) BETWEEN 1 AND 3) OR
   (entry_type = 'OUT' AND coalesce(recorded_by,'') <> '')) NOT VALID;
@@ -61,15 +63,25 @@ CREATE INDEX IF NOT EXISTS stock_entries_date_idx ON stock_entries (entry_date) 
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO app_settings VALUES ('out_unit_price','2.50') ON CONFLICT DO NOTHING;  -- RM/KG, from Excel col K
 INSERT INTO app_settings VALUES ('max_backdate_days','31') ON CONFLICT DO NOTHING;  -- how far back a record may be dated
+-- Summary report header (editable later from the ADMIN tab)
+INSERT INTO app_settings VALUES
+  ('report_company', 'SERVAY EVERGREEN BENONI'),
+  ('report_address', 'GROUND, FIRST & SECOND FLOOR OF SHOPLOT NO. 178, 3-STOREY HYPERMARKET, BENONI COMMERCIAL CENTRE PHASE 3A, 89600, PAPAR, SABAH, MALAYSIA'),
+  ('report_tel', ''),
+  ('report_item', 'MINYAK PAKET 1KG'),
+  ('report_license_no', ''),
+  ('report_license_expiry', '')
+ON CONFLICT DO NOTHING;
 
 -- The ONLY way the app writes. One call = one atomic transaction.
 DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, uuid);  -- v1 signature
 DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, uuid);  -- v2 signature
 DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, jsonb, uuid);  -- v3 signature
+DROP FUNCTION IF EXISTS add_stock_entry(text, numeric, text, text, numeric, text, text, text, text, jsonb, text, date, uuid);  -- v4 signature
 CREATE OR REPLACE FUNCTION add_stock_entry(
   p_type text, p_qty numeric, p_supplier text, p_invoice_no text, p_invoice_amount numeric,
   p_receiving_1 text, p_receiving_2 text, p_supervisor text, p_recorded_by text, p_files jsonb,
-  p_brand text, p_date date, p_key uuid
+  p_brand text, p_cost numeric, p_date date, p_key uuid
 ) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_row stock_entries; v_bal numeric; v_price numeric; v_min numeric; v_max_back int;
@@ -117,7 +129,7 @@ BEGIN
   SELECT value::numeric INTO v_price FROM app_settings WHERE key = 'out_unit_price';
 
   INSERT INTO stock_entries (entry_type, entry_date, quantity_kg, supplier, invoice_no, invoice_amount, unit_price,
-                             receiving_1, receiving_2, supervisor, recorded_by, invoice_files, brand_product, idempotency_key)
+                             receiving_1, receiving_2, supervisor, recorded_by, invoice_files, brand_product, cost_per_carton, idempotency_key)
   VALUES (p_type, p_date, p_qty,
           upper(nullif(btrim(p_supplier),'')), upper(nullif(btrim(p_invoice_no),'')),
           CASE WHEN p_type = 'IN' THEN p_invoice_amount END,
@@ -125,7 +137,8 @@ BEGIN
           upper(nullif(btrim(p_receiving_1),'')), upper(nullif(btrim(p_receiving_2),'')),
           upper(nullif(btrim(p_supervisor),'')),  upper(nullif(btrim(p_recorded_by),'')),
           CASE WHEN p_type = 'IN' THEN p_files END,
-          CASE WHEN p_type = 'IN' THEN upper(nullif(btrim(p_brand),'')) END, p_key)
+          CASE WHEN p_type = 'IN' THEN upper(nullif(btrim(p_brand),'')) END,
+          CASE WHEN p_type = 'IN' THEN p_cost END, p_key)
   RETURNING * INTO v_row;
 
   v_bal := v_bal + CASE p_type WHEN 'IN' THEN p_qty ELSE -p_qty END;
@@ -166,8 +179,56 @@ SELECT jsonb_build_object(
   'entries', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'type', entry_type, 'date', entry_date, 'ts', entry_ts,
                     'supplier', supplier, 'invoice_no', invoice_no, 'invoice_amount', invoice_amount,
                     'receiving_1', receiving_1, 'receiving_2', receiving_2, 'supervisor', supervisor,
-                    'recorded_by', recorded_by, 'files', invoice_files, 'brand', brand_product, 'qty', quantity_kg) ORDER BY entry_ts, id)
+                    'recorded_by', recorded_by, 'files', invoice_files, 'brand', brand_product, 'cost', cost_per_carton, 'qty', quantity_kg) ORDER BY entry_ts, id)
               FROM stock_entries, bounds
               WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first), '[]'::jsonb)
+);
+$$;
+
+-- Monthly summary report (all days of the month, same columns as the Excel sheet).
+-- stok_semasa = opening + instock ; baki = stok_semasa - outstock ; harga = sale price per KG.
+CREATE OR REPLACE FUNCTION report_json(p_month date) RETURNS jsonb LANGUAGE sql STABLE AS $$
+WITH b AS (
+  SELECT date_trunc('month', p_month)::date AS first_day,
+         (date_trunc('month', p_month) + interval '1 month')::date AS next_first
+), price AS (
+  SELECT COALESCE((SELECT value::numeric FROM app_settings WHERE key = 'out_unit_price'), 2.50) AS p
+), opening AS (
+  SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END),0) AS qty
+  FROM stock_entries, b WHERE voided_at IS NULL AND entry_date < first_day
+), per_day AS (
+  SELECT entry_date AS d,
+    SUM(CASE WHEN entry_type = 'IN'  THEN quantity_kg ELSE 0 END) AS in_kg,
+    SUM(CASE WHEN entry_type = 'OUT' THEN quantity_kg ELSE 0 END) AS out_kg,
+    SUM(CASE WHEN entry_type = 'OUT' THEN quantity_kg * COALESCE(unit_price, (SELECT p FROM price)) ELSE 0 END) AS out_amt,
+    COALESCE(jsonb_agg(DISTINCT COALESCE(unit_price, (SELECT p FROM price))) FILTER (WHERE entry_type = 'OUT'), '[]'::jsonb) AS out_prices,
+    COALESCE(jsonb_agg(jsonb_build_object('supplier', supplier, 'brand', brand_product, 'invoice_no', invoice_no,
+                       'cost', cost_per_carton, 'amount', invoice_amount, 'qty', quantity_kg) ORDER BY entry_ts, id)
+             FILTER (WHERE entry_type = 'IN'), '[]'::jsonb) AS buys
+  FROM stock_entries, b
+  WHERE voided_at IS NULL AND entry_date >= first_day AND entry_date < next_first GROUP BY entry_date
+), days AS (
+  SELECT g::date AS d FROM b, generate_series(first_day, next_first - 1, interval '1 day') g
+), ledger AS (
+  SELECT d, COALESCE(in_kg,0) AS in_kg, COALESCE(out_kg,0) AS out_kg, COALESCE(out_amt,0) AS out_amt,
+         COALESCE(out_prices,'[]'::jsonb) AS out_prices, COALESCE(buys,'[]'::jsonb) AS buys,
+         (SELECT qty FROM opening) + SUM(COALESCE(in_kg,0) - COALESCE(out_kg,0)) OVER (ORDER BY d) AS closing
+  FROM days LEFT JOIN per_day USING (d)
+)
+SELECT jsonb_build_object(
+  'month', (SELECT to_char(first_day, 'YYYY-MM') FROM b),
+  'price', (SELECT p FROM price),
+  'header', jsonb_build_object(
+      'company', (SELECT value FROM app_settings WHERE key = 'report_company'),
+      'address', (SELECT value FROM app_settings WHERE key = 'report_address'),
+      'tel',     (SELECT value FROM app_settings WHERE key = 'report_tel'),
+      'item',    (SELECT value FROM app_settings WHERE key = 'report_item'),
+      'license_no',     (SELECT value FROM app_settings WHERE key = 'report_license_no'),
+      'license_expiry', (SELECT value FROM app_settings WHERE key = 'report_license_expiry')),
+  'total_in',  (SELECT COALESCE(SUM(in_kg),0)  FROM ledger),
+  'total_out', (SELECT COALESCE(SUM(out_kg),0) FROM ledger),
+  'rows', (SELECT jsonb_agg(jsonb_build_object('date', d, 'opening', closing - in_kg + out_kg, 'in', in_kg,
+                   'semasa', closing + out_kg, 'out', out_kg, 'out_amount', out_amt, 'out_prices', out_prices,
+                   'buys', buys, 'closing', closing) ORDER BY d) FROM ledger)
 );
 $$;
