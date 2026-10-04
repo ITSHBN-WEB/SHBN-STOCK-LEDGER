@@ -40,3 +40,11 @@ Local test (optional): `npm i -g vercel`, copy `.env.example` to `.env`, run `ve
 
 Rules: 1 to 3 files per Instock record; photos are shrunk in the browser (about 300 to 600 KB);
 PDF max 3 MB; only JPG, PNG, PDF; only links from your own Blob store are accepted.
+
+## Upgrading to v4 (Brand / Product box, back-dated records with date confirmation)
+1. Neon SQL Editor: paste the whole updated `db/schema.sql` and run it (safe to re-run; adds `brand_product`,
+   the `max_backdate_days` setting (default 31) and replaces `add_stock_entry()` with the date-aware version).
+2. GitHub: replace `api/entries.js` and `public/index.html` (plus `db/schema.sql`). Vercel redeploys by itself.
+
+Rules: every record carries the date of the actual movement (confirmed by the user, never in the future, at most
+31 days back). A back-dated OUT is refused if it would make the balance negative on that day or any later day.
