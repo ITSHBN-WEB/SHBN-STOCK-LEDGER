@@ -97,18 +97,18 @@
   .rpt td.grey { background:#a6a6a6; text-align:right; padding-right:6px; } .rpt td.black { background:#000; }
   .rpt td.val { font-weight:400; font-size:12px; }
   @page { size: A4 landscape; margin: 8mm; }
-  @media print {
-    body { color:#000; } body::before { background:#fff; }
-    body.print-report .wrap { max-width:none; padding:0; }
-    body.print-report h1, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report .rtools { display:none !important; }
-    body.print-report #rep { display:block !important; }
-    body.print-report .paper { padding:0; border-radius:0; overflow:visible; }
-    body.print-report .rpt { min-width:0; font-size:8pt; }
-    body.print-report .rpt td { height:auto; padding:1px 2px; }
-    body.print-report .rpt thead { display:table-header-group; }
-    body.print-report .rpt tr { break-inside:avoid; }
-    body.print-report .rpt th, body.print-report .rpt td.grey, body.print-report .rpt td.black { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-  }
+  /* Print mode: these rules are class-based (not only @media print) so the page can be measured and
+     scaled to ONE sheet before the print dialog opens. */
+  body.print-report::before { background:#fff; }
+  body.print-report .wrap { max-width:none; padding:0; }
+  body.print-report h1, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report .rtools { display:none !important; }
+  body.print-report #rep { display:block !important; }
+  body.print-report .paper { padding:0; border-radius:0; overflow:visible; }
+  body.print-report .rpt { min-width:0; width:281mm; font-size:8pt; }
+  body.print-report .rpt td { height:auto; padding:1px 2px; }
+  body.print-report .rpt tr { break-inside:avoid; }
+  body.print-report .rpt th, body.print-report .rpt td.grey, body.print-report .rpt td.black { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  @media print { body { color:#000; } body::before { background:#fff; } }
 </style>
 </head>
 <body>
@@ -489,8 +489,20 @@ async function loadReport() {
     $('rpt').innerHTML = reportHTML(r);
   } catch (e) { $('rpt').innerHTML = `<div style="color:#b00020;font-weight:700">${esc(e.message)}</div>`; }
 }
-$('rprint').onclick = () => { document.body.classList.add('print-report'); window.print(); };
-window.addEventListener('afterprint', () => document.body.classList.remove('print-report'));
+// One sheet: measure the report in print layout (A4 landscape, 8 mm margins) and shrink it to fit the page height.
+$('rprint').onclick = () => {
+  const el = $('rpt');
+  document.body.classList.add('print-report');
+  el.style.zoom = ''; el.style.width = '';
+  const availH = (194 / 25.4) * 96 * 0.97;             // printable height in CSS px, with a 3% safety margin
+  const z = Math.max(0.5, Math.min(1, availH / el.scrollHeight));
+  if (z < 1) { el.style.zoom = z; el.style.width = (281 / z) + 'mm'; }
+  window.print();
+};
+window.addEventListener('afterprint', () => {
+  document.body.classList.remove('print-report');
+  $('rpt').style.zoom = ''; $('rpt').style.width = '';
+});
 
 loadLedger();
 </script>
