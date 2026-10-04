@@ -32,7 +32,7 @@ Local test (optional): `npm i -g vercel`, copy `.env.example` to `.env`, run `ve
 
 ## Upgrading to v3 (invoice photo / PDF upload on Instock)
 1. **Vercel > your project > Storage > Create > Blob.** Connect it to the project (all environments).
-   This adds `BLOB_READ_WRITE_TOKEN` automatically.
+   Vercel now connects it with OIDC and adds `BLOB_STORE_ID` (not a token). This needs `@vercel/blob` 2.x (already set in package.json).
 2. Neon SQL Editor: paste the whole updated `db/schema.sql` and run it (safe to re-run).
 3. GitHub: upload the new/changed files: `package.json`, `api/entries.js`, `api/upload.js`,
    `lib/files.js`, `public/index.html`, `db/schema.sql`. Vercel redeploys by itself.
