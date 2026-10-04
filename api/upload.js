@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     res.status(200).json({ url: blob.url, name: r.name, type: r.type, size: r.buf.length });
   } catch (e) {
     console.error(e);
-    const noStore = /token/i.test(String(e.message));
+    const noStore = /token|BLOB_STORE_ID|authenticat|OIDC/i.test(String(e.message));
     res.status(500).json({ error: noStore ? 'FILE STORAGE IS NOT CONNECTED (VERCEL BLOB)' : 'UPLOAD FAILED, TRY AGAIN' });
   }
 }
