@@ -78,7 +78,37 @@
   .frow .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .frow button { border:0; background:rgba(0,0,0,.25); color:#fff; border-radius:8px; width:30px; height:30px; cursor:pointer; font-size:14px; }
   button.pick { width:100%; padding:12px; border-radius:10px; border:1px dashed rgba(255,255,255,.6); background:transparent; color:#fff; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
-  @media print { body { color:#000; } body::before { background:#fff; } }
+  @media (max-width:520px) { .tabs .tab { font-size:11px; letter-spacing:.03em; padding:12px 4px; } }
+  .rtools { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .rtools button { padding:12px 22px; border:0; border-radius:10px; background:#fff; color:#4338ca; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
+  .paper { background:#fff; color:#000; border-radius:6px; padding:14px; overflow-x:auto; }
+  .rpt { min-width:960px; font-family:Calibri,Carlito,Arial,sans-serif; font-size:11px; color:#000; }
+  .rpt .title { text-align:center; font-weight:700; margin-bottom:10px; font-size:12px; }
+  .rpt .rhead { display:grid; grid-template-columns:46% 54%; margin-bottom:10px; font-weight:700; }
+  .rpt .kvr { display:grid; grid-template-columns:130px 14px 1fr; padding:2px 0; line-height:1.35; }
+  .rpt .kvr.r { grid-template-columns:150px 14px 1fr; }
+  .rpt table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  .rpt th, .rpt td { color:#000; border:1px solid #000; padding:2px 3px; text-align:center; vertical-align:middle; font-weight:400; word-wrap:break-word; }
+  .rpt th { background:#d9d9d9; }
+  .rpt td { height:20px; }
+  .rpt tbody td:first-child { white-space:nowrap; }
+  .rpt .blk { line-height:1.25; } .rpt .multi .blk { min-height:2.5em; } .rpt .multi .blk + .blk { margin-top:2px; }
+  .rpt tr.foot td { height:20px; font-size:12px; font-weight:700; }
+  .rpt td.grey { background:#a6a6a6; text-align:right; padding-right:6px; } .rpt td.black { background:#000; }
+  .rpt td.val { font-weight:400; font-size:12px; }
+  @page { size: A4 landscape; margin: 8mm; }
+  @media print {
+    body { color:#000; } body::before { background:#fff; }
+    body.print-report .wrap { max-width:none; padding:0; }
+    body.print-report h1, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report .rtools { display:none !important; }
+    body.print-report #rep { display:block !important; }
+    body.print-report .paper { padding:0; border-radius:0; overflow:visible; }
+    body.print-report .rpt { min-width:0; font-size:8pt; }
+    body.print-report .rpt td { height:auto; padding:1px 2px; }
+    body.print-report .rpt thead { display:table-header-group; }
+    body.print-report .rpt tr { break-inside:avoid; }
+    body.print-report .rpt th, body.print-report .rpt td.grey, body.print-report .rpt td.black { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  }
 </style>
 </head>
 <body>
@@ -87,6 +117,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="dash">DASHBOARD</button>
     <button class="tab" data-tab="add">ADD RECORD</button>
+    <button class="tab" data-tab="rep">SUMMARY REPORT</button>
   </div>
 
   <!-- DASHBOARD -->
@@ -101,6 +132,12 @@
   </section>
 
   <!-- ADD RECORD -->
+  <!-- SUMMARY REPORT -->
+  <section id="rep" class="hidden">
+    <div class="rtools"><input type="month" id="rmonth"><button type="button" id="rprint">PRINT REPORT</button></div>
+    <div class="paper"><div id="rpt" class="rpt"><div class="muted" style="color:#555">LOADING...</div></div></div>
+  </section>
+
   <section id="add" class="hidden">
     <div class="card">
       <div class="sub">
@@ -122,6 +159,7 @@
         <div id="filelist"></div>
         <label>SUPPLIER</label><input type="text" id="supplier" autocomplete="off">
         <label>BRAND / PRODUCT</label><input type="text" id="brand" autocomplete="off">
+        <label>COST PER CARTON</label><input type="text" id="cost" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
         <label>INVOICE NUMBER</label><input type="text" id="invno" autocomplete="off">
         <label>INVOICE AMOUNT</label><input type="text" id="amount" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
         <label>QUANTITY (KG)</label><input type="text" id="qty-in" inputmode="decimal" autocomplete="off">
@@ -177,9 +215,9 @@ async function api(path, opts = {}) {
 // ---- Tabs ----
 document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
-  $('dash').classList.toggle('hidden', b.dataset.tab !== 'dash');
-  $('add').classList.toggle('hidden', b.dataset.tab !== 'add');
+  ['dash', 'add', 'rep'].forEach((id) => $(id).classList.toggle('hidden', b.dataset.tab !== id));
   if (b.dataset.tab === 'dash') loadLedger();
+  if (b.dataset.tab === 'rep') loadReport();
 });
 document.querySelectorAll('[data-sub]').forEach((b) => b.onclick = () => {
   document.querySelectorAll('[data-sub]').forEach((x) => x.classList.toggle('active', x === b));
@@ -207,7 +245,7 @@ function detailHTML(e) {
   const head = `<div class="det-h"><div><span class="badge">${e.type}</span> ${late ? '<span class="badge late-tag">LATE ENTRY</span>' : '&nbsp;' + timeOf(e.ts)}</div>
     <b class="${e.type === 'IN' ? 'in' : 'out'}">${e.type === 'IN' ? '+' : '-'}${fmt(e.qty)} KG</b></div>`;
   const body = e.type === 'IN'
-    ? kv('SUPPLIER', e.supplier) + kv('BRAND / PRODUCT', e.brand) + kv('INVOICE NO.', e.invoice_no) + kv('INVOICE AMOUNT', e.invoice_amount == null ? '' : 'RM ' + rm(e.invoice_amount))
+    ? kv('SUPPLIER', e.supplier) + kv('BRAND / PRODUCT', e.brand) + kv('COST PER CARTON', e.cost == null ? '' : 'RM ' + rm(e.cost)) + kv('INVOICE NO.', e.invoice_no) + kv('INVOICE AMOUNT', e.invoice_amount == null ? '' : 'RM ' + rm(e.invoice_amount))
       + kv('RECEIVING 1', e.receiving_1) + kv('RECEIVING 2', e.receiving_2) + kv('SUPERVISOR', e.supervisor)
       + `<div><span>INVOICE FILES</span><b>${fileLinks(e) || '-'}</b></div>` + lateKv
     : kv('TIMESTAMP', new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase())
@@ -255,12 +293,15 @@ function maskRM(raw) {
   int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return 'RM ' + int + (p.length > 1 ? '.' + p.slice(1).join('').slice(0, 2) : '');
 }
-$('amount').addEventListener('input', (e) => { e.target.value = maskRM(e.target.value); });
-$('amount').addEventListener('blur', (e) => {
-  if (!e.target.value) return;
-  const [i, d = ''] = e.target.value.replace('RM ', '').split('.');
-  e.target.value = 'RM ' + (i || '0') + '.' + (d + '00').slice(0, 2);
+['amount', 'cost'].forEach((id) => {
+  $(id).addEventListener('input', (e) => { e.target.value = maskRM(e.target.value); });
+  $(id).addEventListener('blur', (e) => {
+    if (!e.target.value) return;
+    const [i, d = ''] = e.target.value.replace('RM ', '').split('.');
+    e.target.value = 'RM ' + (i || '0') + '.' + (d + '00').slice(0, 2);
+  });
 });
+const costValue = () => $('cost').value.replace(/[^\d.]/g, '');
 const amountValue = () => $('amount').value.replace(/[^\d.]/g, '');
 
 // ---- Save (idempotency key per form: a double-click or retry can never duplicate) ----
@@ -367,14 +408,14 @@ $('files').addEventListener('change', async (ev) => {
   if (errs.length) show('msg-in', false, errs.join(' | '));
 });
 
-const clearIn  = () => { ['supplier', 'brand', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); resetFiles(); };
+const clearIn  = () => { ['supplier', 'brand', 'cost', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); resetFiles(); };
 const clearOut = () => { ['qty-out', 'recby'].forEach((i) => $(i).value = ''); };
 $('clear-in').onclick  = () => { clearIn();  $('msg-in').className = 'msg'; startDate('in'); };
 $('clear-out').onclick = () => { clearOut(); $('msg-out').className = 'msg'; startDate('out'); };
 
 $('save-in').onclick = async () => {
   const v = (id) => $(id).value.trim();
-  const need = !confirmed.in ? 'CONFIRM THE DATE FIRST' : !picked.length ? 'ATTACH AT LEAST 1 INVOICE FILE' : !v('supplier') ? 'SUPPLIER IS REQUIRED' : !v('brand') ? 'BRAND / PRODUCT IS REQUIRED' : !v('invno') ? 'INVOICE NUMBER IS REQUIRED'
+  const need = !confirmed.in ? 'CONFIRM THE DATE FIRST' : !picked.length ? 'ATTACH AT LEAST 1 INVOICE FILE' : !v('supplier') ? 'SUPPLIER IS REQUIRED' : !v('brand') ? 'BRAND / PRODUCT IS REQUIRED' : !costValue() ? 'ENTER A VALID COST PER CARTON' : !v('invno') ? 'INVOICE NUMBER IS REQUIRED'
     : !amountValue() ? 'ENTER A VALID INVOICE AMOUNT' : !Number(v('qty-in')) ? 'ENTER A VALID QUANTITY (KG)'
     : !v('rcv1') ? 'RECEIVING 1 IS REQUIRED' : !v('sup') ? 'SUPERVISOR IS REQUIRED' : '';
   if (need) return show('msg-in', false, need);        // check BEFORE uploading, so no stray files are stored
@@ -386,7 +427,7 @@ $('save-in').onclick = async () => {
       p.uploaded = await api('/api/upload', { method: 'POST', body: JSON.stringify({ name: p.name, type: p.type, data: await toBase64(p.blob) }) });
     }
     const r = await api('/api/entries', { method: 'POST', body: JSON.stringify({
-      type: 'IN', date: confirmed.in, supplier: v('supplier'), brand: v('brand'), invoiceNo: v('invno'), invoiceAmount: amountValue(), quantity: v('qty-in'),
+      type: 'IN', date: confirmed.in, supplier: v('supplier'), brand: v('brand'), costPerCarton: costValue(), invoiceNo: v('invno'), invoiceAmount: amountValue(), quantity: v('qty-in'),
       receiving1: v('rcv1'), receiving2: v('rcv2'), supervisor: v('sup'), files: picked.map((p) => p.uploaded), key: keyIn }) });
     show('msg-in', true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
     clearIn(); startDate('in'); keyIn = crypto.randomUUID();
@@ -396,6 +437,60 @@ $('save-in').onclick = async () => {
 $('save-out').onclick = () => !confirmed.out ? show('msg-out', false, 'CONFIRM THE DATE FIRST') : submit('save-out', 'msg-out',
   { type: 'OUT', date: confirmed.out, quantity: $('qty-out').value, recordedBy: $('recby').value, key: keyOut },
   () => { clearOut(); startDate('out'); keyOut = crypto.randomUUID(); });
+
+// ---- Summary report (same layout and wording as the Excel sheet) ----
+$('rmonth').value = nowMY.slice(0, 7);
+$('rmonth').onchange = loadReport;
+const kgTxt = (n) => String(+Number(n).toFixed(2));
+const money2 = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const dmyNoPad = (iso) => { const [y, m, d] = iso.split('-'); return `${+d}/${+m}/${y}`; };
+const lines = (arr) => arr.map((x) => esc(String(x))).join('<br>');
+
+function reportHTML(r) {
+  const [y, m] = r.month.split('-').map(Number);
+  const monthName = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
+  const h = r.header || {};
+  const kvr = (k, v, cls = '') => `<div class="kvr ${cls}"><div>${k}</div><div>:</div><div>${esc(v || '')}</div></div>`;
+  const body = r.rows.map((x) => {
+    const names = x.buys.map((b) => `<div class="blk">${lines([b.supplier, b.brand].filter(Boolean))}</div>`).join('');
+    const invs  = x.buys.map((b) => `<div class="blk">${esc(b.invoice_no || '')}</div>`).join('');
+    const costs = [...new Set(x.buys.filter((b) => b.cost != null).map((b) => Number(b.cost).toFixed(2)))];
+    const amts  = x.buys.filter((b) => b.amount != null);
+    const prices = (x.out_prices.length ? x.out_prices : [r.price]).map(money2);
+    const multi = x.buys.length > 1 ? ' multi' : '';
+    return `<tr><td>${dmyNoPad(x.date)}</td><td>${kgTxt(x.opening)}</td>
+      <td class="${multi}">${names}</td><td class="${multi}">${invs}</td>
+      <td>${x.in > 0 ? kgTxt(x.in) : ''}</td><td>${lines(costs)}</td>
+      <td>${amts.length ? money2(amts.reduce((t, b) => t + Number(b.amount), 0)) : ''}</td>
+      <td>${kgTxt(x.semasa)}</td><td></td>
+      <td>${x.out > 0 ? kgTxt(x.out) : ''}</td><td>${lines(prices)}</td>
+      <td>${x.out > 0 ? money2(x.out_amount) : ''}</td><td>${kgTxt(x.closing)}</td></tr>`;
+  }).join('');
+  const widths = [11, 9, 22,  10.9, 9, 7.5, 8.5, 13.5, 11.7, 9, 7.5, 10.6, 9];
+  const sum = widths.reduce((a, b) => a + b, 0);
+  return `<div class="title">PENYATA STOK BARANG KAWALAN BERJADUAL</div>
+    <div class="rhead">
+      <div>${kvr('NAMA SYARIKAT', h.company)}${kvr('ALAMAT', h.address)}${kvr('NO. TEL', h.tel)}</div>
+      <div>${kvr('JENIS BARANG KAWALAN', h.item, 'r')}${kvr('BULAN/TAHUN', monthName, 'r')}${kvr('NO. LESEN CSA', h.license_no, 'r')}${kvr('TARIKH TAMAT LESEN', h.license_expiry, 'r')}</div>
+    </div>
+    <table><colgroup>${widths.map((w) => `<col style="width:${(w / sum * 100).toFixed(2)}%">`).join('')}</colgroup>
+      <thead>
+        <tr><th rowspan="2">TARIKH</th><th rowspan="2">STOK MULA (KG)</th><th colspan="5">BELIAN</th><th rowspan="2">STOK SEMASA (KG)</th><th colspan="4">JUALAN</th><th rowspan="2">BAKI STOK (KG)</th></tr>
+        <tr><th>NAMA, ALAMAT, NO TEL PEMBEKAL</th><th>NO. INVOIS BELIAN</th><th>KUANTITI (KG)</th><th>HARGA PER KOTAK (RM)</th><th>JUMLAH BELIAN (RM)</th>
+            <th>NO. INVOIS JUALAN</th><th>KUANTITI (KG)</th><th>HARGA (RM)</th><th>JUMLAH JUALAN (RM)</th></tr>
+      </thead>
+      <tbody>${body}
+        <tr class="foot"><td class="grey" colspan="4">JUMLAH</td><td class="val">${kgTxt(r.total_in)}</td><td class="grey" colspan="4">JUMLAH</td><td class="val">${kgTxt(r.total_out)}</td><td class="black" colspan="3"></td></tr>
+      </tbody></table>`;
+}
+async function loadReport() {
+  try {
+    const r = await api('/api/report?month=' + $('rmonth').value);
+    $('rpt').innerHTML = reportHTML(r);
+  } catch (e) { $('rpt').innerHTML = `<div style="color:#b00020;font-weight:700">${esc(e.message)}</div>`; }
+}
+$('rprint').onclick = () => { document.body.classList.add('print-report'); window.print(); };
+window.addEventListener('afterprint', () => document.body.classList.remove('print-report'));
 
 loadLedger();
 </script>
