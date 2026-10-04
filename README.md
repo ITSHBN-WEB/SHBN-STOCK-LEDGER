@@ -3,6 +3,7 @@
 ## Structure
 - `db/schema.sql`   table, `add_stock_entry()` (locked write), `ledger_json()` (dashboard data)
 - `api/`            Vercel serverless endpoints (`/api/ledger`, `/api/entries`)
+- `api/report.js`   monthly summary report data
 - `api/upload.js`   uploads one invoice photo/PDF to Vercel Blob
 - `lib/db.js`       Neon connection + optional passcode check
 - `lib/files.js`    invoice file rules (types, size, allowed links)
@@ -48,3 +49,12 @@ PDF max 3 MB; only JPG, PNG, PDF; only links from your own Blob store are accept
 
 Rules: every record carries the date of the actual movement (confirmed by the user, never in the future, at most
 31 days back). A back-dated OUT is refused if it would make the balance negative on that day or any later day.
+
+## Upgrading to v5 (Cost per carton box + SUMMARY REPORT tab)
+1. Neon SQL Editor: paste the whole updated `db/schema.sql` and run it (safe to re-run). It adds `cost_per_carton`,
+   the report header settings (company, address, item, tel, licence) and the `report_json()` function.
+2. GitHub: upload `api/report.js` (new), and replace `api/entries.js`, `public/index.html`, `db/schema.sql`.
+
+Report rules: stok semasa = stok mula + instock; baki = stok semasa - outstock; harga = sale price (RM 2.50);
+jumlah jualan = outstock qty x harga; cost per carton shows one value if equal that day, stacked if different.
+Print: SUMMARY REPORT tab > PRINT REPORT (A4 landscape).
