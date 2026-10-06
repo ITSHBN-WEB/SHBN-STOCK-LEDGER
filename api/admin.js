@@ -130,6 +130,7 @@ export default async function handler(req, res) {
     }
     if (msg.includes('NOT_FOUND')) return res.status(404).json({ error: 'RECORD NOT FOUND (IT MAY HAVE BEEN CHANGED OR VOIDED)' });
     if (msg.includes('DATE_IN_FUTURE')) return res.status(400).json({ error: 'DATE CANNOT BE IN THE FUTURE' });
+    if (msg.includes('in_complete')) return res.status(400).json({ error: 'THIS RECORD IS MISSING REQUIRED DETAILS. FILL IN THE EMPTY BOXES (BRAND, COST, FILES...) AND SAVE' });
     if (/check constraint|invalid input|out of range/i.test(msg)) return res.status(400).json({ error: 'PLEASE CHECK THE VALUES ENTERED' });
     console.error(e);
     return res.status(500).json({ error: 'SERVER ERROR' });
