@@ -45,7 +45,7 @@ ALTER TABLE stock_entries ADD CONSTRAINT upper_only CHECK (
 -- New records from the app must be complete; imported history may have gaps.
 ALTER TABLE stock_entries DROP CONSTRAINT IF EXISTS in_complete;
 ALTER TABLE stock_entries ADD CONSTRAINT in_complete CHECK (
-  source <> 'APP' OR
+  source <> 'APP' OR voided_at IS NOT NULL OR
   (entry_type = 'IN'  AND coalesce(supplier,'') <> '' AND coalesce(invoice_no,'') <> ''
                       AND invoice_amount IS NOT NULL
                       AND coalesce(receiving_1,'') <> '' AND coalesce(supervisor,'') <> ''
