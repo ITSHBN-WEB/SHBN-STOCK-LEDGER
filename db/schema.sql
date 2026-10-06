@@ -185,6 +185,33 @@ SELECT jsonb_build_object(
 );
 $$;
 
+-- Report header, versioned by month: a row saved for month M applies to M and every later month until the next
+-- row. Earlier months keep their own header, so past reports never change. No row = the defaults in app_settings.
+CREATE TABLE IF NOT EXISTS report_headers (
+  month          DATE PRIMARY KEY CHECK (month = date_trunc('month', month)::date),
+  company        TEXT NOT NULL DEFAULT '',
+  address        TEXT NOT NULL DEFAULT '',
+  tel            TEXT NOT NULL DEFAULT '',
+  item           TEXT NOT NULL DEFAULT '',
+  license_no     TEXT NOT NULL DEFAULT '',
+  license_expiry TEXT NOT NULL DEFAULT '',
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION report_header(p_month date) RETURNS jsonb LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(
+    (SELECT jsonb_build_object('company', company, 'address', address, 'tel', tel, 'item', item,
+                               'license_no', license_no, 'license_expiry', license_expiry)
+       FROM report_headers WHERE month <= date_trunc('month', p_month)::date ORDER BY month DESC LIMIT 1),
+    jsonb_build_object(
+      'company', (SELECT value FROM app_settings WHERE key = 'report_company'),
+      'address', (SELECT value FROM app_settings WHERE key = 'report_address'),
+      'tel',     (SELECT value FROM app_settings WHERE key = 'report_tel'),
+      'item',    (SELECT value FROM app_settings WHERE key = 'report_item'),
+      'license_no',     (SELECT value FROM app_settings WHERE key = 'report_license_no'),
+      'license_expiry', (SELECT value FROM app_settings WHERE key = 'report_license_expiry')));
+$$;
+
 -- Monthly summary report (all days of the month, same columns as the Excel sheet).
 -- stok_semasa = opening + instock ; baki = stok_semasa - outstock ; harga = sale price per KG.
 CREATE OR REPLACE FUNCTION report_json(p_month date) RETURNS jsonb LANGUAGE sql STABLE AS $$
@@ -218,13 +245,7 @@ WITH b AS (
 SELECT jsonb_build_object(
   'month', (SELECT to_char(first_day, 'YYYY-MM') FROM b),
   'price', (SELECT p FROM price),
-  'header', jsonb_build_object(
-      'company', (SELECT value FROM app_settings WHERE key = 'report_company'),
-      'address', (SELECT value FROM app_settings WHERE key = 'report_address'),
-      'tel',     (SELECT value FROM app_settings WHERE key = 'report_tel'),
-      'item',    (SELECT value FROM app_settings WHERE key = 'report_item'),
-      'license_no',     (SELECT value FROM app_settings WHERE key = 'report_license_no'),
-      'license_expiry', (SELECT value FROM app_settings WHERE key = 'report_license_expiry')),
+  'header', report_header(p_month),
   'total_in',  (SELECT COALESCE(SUM(in_kg),0)  FROM ledger),
   'total_out', (SELECT COALESCE(SUM(out_kg),0) FROM ledger),
   'rows', (SELECT jsonb_agg(jsonb_build_object('date', d, 'opening', closing - in_kg + out_kg, 'in', in_kg,
@@ -232,3 +253,98 @@ SELECT jsonb_build_object(
                    'buys', buys, 'closing', closing) ORDER BY d) FROM ledger)
 );
 $$;
+
+-- ===================== v6: ADMIN (report header per month, edit / void records, audit) =====================
+
+-- Every admin edit / void is logged (who changed what, before and after).
+CREATE TABLE IF NOT EXISTS stock_entry_audit (
+  id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  entry_id  BIGINT NOT NULL,
+  action    TEXT   NOT NULL CHECK (action IN ('EDIT','VOID')),
+  ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  before    JSONB,
+  after     JSONB,
+  reason    TEXT
+);
+
+-- Wrong-password log, used to lock the admin login after too many attempts.
+CREATE TABLE IF NOT EXISTS admin_attempts (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ts TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Raises an error if the running balance is negative on any day from p_from onward.
+CREATE OR REPLACE FUNCTION assert_ledger_ok(p_from date) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE v_d date; v_c numeric;
+BEGIN
+  SELECT d, c INTO v_d, v_c FROM (
+    SELECT d, SUM(net) OVER (ORDER BY d) AS c FROM (
+      SELECT entry_date AS d, SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END) AS net
+      FROM stock_entries WHERE voided_at IS NULL GROUP BY entry_date) x) y
+  WHERE c < 0 AND d >= p_from ORDER BY d LIMIT 1;
+  IF FOUND THEN RAISE EXCEPTION 'NEGATIVE_BALANCE: % KG on %', v_c, v_d; END IF;
+END $$;
+
+-- The records of one day, for the admin edit screen.
+CREATE OR REPLACE FUNCTION admin_records_json(p_date date) RETURNS jsonb LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'id', id, 'type', entry_type, 'date', entry_date, 'ts', entry_ts, 'source', source, 'qty', quantity_kg,
+      'supplier', supplier, 'brand', brand_product, 'cost', cost_per_carton, 'invoice_no', invoice_no,
+      'invoice_amount', invoice_amount, 'receiving_1', receiving_1, 'receiving_2', receiving_2,
+      'supervisor', supervisor, 'recorded_by', recorded_by, 'files', COALESCE(invoice_files, '[]'::jsonb))
+    ORDER BY entry_ts, id), '[]'::jsonb)
+  FROM stock_entries WHERE entry_date = p_date AND voided_at IS NULL;
+$$;
+
+-- Edit one record. Balances are always computed from entries, so every opening / closing balance after the
+-- edited date updates by itself. Refused if any day would go negative.
+CREATE OR REPLACE FUNCTION admin_update_entry(p_id bigint, p_d jsonb) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_old stock_entries; v_new stock_entries; v_date date; v_bal numeric;
+  v_today date := (now() AT TIME ZONE 'Asia/Kuala_Lumpur')::date;
+  v_in boolean;
+BEGIN
+  PERFORM pg_advisory_xact_lock(727001);
+  SELECT * INTO v_old FROM stock_entries WHERE id = p_id AND voided_at IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'NOT_FOUND'; END IF;
+  v_in := v_old.entry_type = 'IN';
+  v_date := (p_d->>'date')::date;
+  IF v_date IS NULL OR v_date > v_today THEN RAISE EXCEPTION 'DATE_IN_FUTURE'; END IF;
+
+  UPDATE stock_entries SET
+    entry_date      = v_date,
+    quantity_kg     = (p_d->>'qty')::numeric,
+    supplier        = CASE WHEN v_in THEN upper(nullif(btrim(p_d->>'supplier'), '')) END,
+    brand_product   = CASE WHEN v_in THEN upper(nullif(btrim(p_d->>'brand'), '')) END,
+    cost_per_carton = CASE WHEN v_in THEN nullif(p_d->>'cost', '')::numeric END,
+    invoice_no      = CASE WHEN v_in THEN upper(nullif(btrim(p_d->>'invoice_no'), '')) END,
+    invoice_amount  = CASE WHEN v_in THEN nullif(p_d->>'invoice_amount', '')::numeric END,
+    receiving_1     = CASE WHEN v_in THEN upper(nullif(btrim(p_d->>'receiving_1'), '')) END,
+    receiving_2     = CASE WHEN v_in THEN upper(nullif(btrim(p_d->>'receiving_2'), '')) END,
+    supervisor      = CASE WHEN v_in THEN upper(nullif(btrim(p_d->>'supervisor'), '')) END,
+    recorded_by     = CASE WHEN v_in THEN NULL ELSE upper(nullif(btrim(p_d->>'recorded_by'), '')) END,
+    invoice_files   = CASE WHEN v_in AND jsonb_typeof(p_d->'files') = 'array' THEN p_d->'files' ELSE invoice_files END
+  WHERE id = p_id RETURNING * INTO v_new;
+
+  PERFORM assert_ledger_ok(LEAST(v_old.entry_date, v_date));
+  INSERT INTO stock_entry_audit (entry_id, action, before, after) VALUES (p_id, 'EDIT', to_jsonb(v_old), to_jsonb(v_new));
+
+  SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END), 0)
+    INTO v_bal FROM stock_entries WHERE voided_at IS NULL;
+  RETURN jsonb_build_object('entry', to_jsonb(v_new), 'balance', v_bal);
+END $$;
+
+-- Void (soft-delete) one record. The record stays in the database and in the audit log.
+CREATE OR REPLACE FUNCTION admin_void_entry(p_id bigint, p_reason text) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE v_old stock_entries; v_new stock_entries; v_bal numeric;
+BEGIN
+  PERFORM pg_advisory_xact_lock(727001);
+  SELECT * INTO v_old FROM stock_entries WHERE id = p_id AND voided_at IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'NOT_FOUND'; END IF;
+  UPDATE stock_entries SET voided_at = now(), void_reason = p_reason WHERE id = p_id RETURNING * INTO v_new;
+  PERFORM assert_ledger_ok(v_old.entry_date);
+  INSERT INTO stock_entry_audit (entry_id, action, before, after, reason) VALUES (p_id, 'VOID', to_jsonb(v_old), to_jsonb(v_new), p_reason);
+  SELECT COALESCE(SUM(CASE entry_type WHEN 'IN' THEN quantity_kg ELSE -quantity_kg END), 0)
+    INTO v_bal FROM stock_entries WHERE voided_at IS NULL;
+  RETURN jsonb_build_object('balance', v_bal);
+END $$;
