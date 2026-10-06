@@ -3,6 +3,7 @@
 ## Structure
 - `db/schema.sql`   table, `add_stock_entry()` (locked write), `ledger_json()` (dashboard data)
 - `api/`            Vercel serverless endpoints (`/api/ledger`, `/api/entries`)
+- `api/admin.js`    ADMIN tab (password-checked on the server): report header per month, edit / void records
 - `api/report.js`   monthly summary report data
 - `api/upload.js`   uploads one invoice photo/PDF to Vercel Blob
 - `lib/db.js`       Neon connection + optional passcode check
@@ -58,3 +59,14 @@ Rules: every record carries the date of the actual movement (confirmed by the us
 Report rules: stok semasa = stok mula + instock; baki = stok semasa - outstock; harga = sale price (RM 2.50);
 jumlah jualan = outstock qty x harga; cost per carton shows one value if equal that day, stacked if different.
 Print: SUMMARY REPORT tab > PRINT REPORT (A4 landscape).
+
+## Upgrading to v6 (wider layout, ADMIN tab)
+1. **Vercel > Settings > Environment Variables:** add `ADMIN_PASSWORD` (the admin password). Redeploy afterwards.
+   The password is never stored in the code or in GitHub. 10 wrong attempts within 10 minutes lock the admin login for 10 minutes.
+2. Neon SQL Editor: paste the whole updated `db/schema.sql` and run it (safe to re-run).
+3. GitHub: upload `api/admin.js` (new) and replace `public/index.html` and `db/schema.sql`.
+
+ADMIN functions: update the report header (saved per month: applies from that month onward, earlier months keep
+their own header); edit an existing record by date (all fields, invoice files, date) with a confirmation popup;
+void a record (reason required). A change is refused if any day's stock would go negative. Every edit / void is
+written to `stock_entry_audit` (before and after).
