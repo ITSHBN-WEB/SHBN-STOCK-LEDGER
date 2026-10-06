@@ -10,7 +10,7 @@
   body { margin:0; min-height:100vh; color:var(--ink); font-family:Arial,Helvetica,sans-serif; }
   /* gradient on its own fixed layer: much cheaper to scroll than background-attachment:fixed */
   body::before { content:''; position:fixed; inset:0; z-index:-1; background:linear-gradient(135deg,#1d4ed8 0%,#4f46e5 50%,#7e22ce 100%); }
-  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  .wrap { max-width:1360px; margin:0 auto; padding:20px 16px 60px; }
   h1 { font-size:18px; letter-spacing:.12em; margin:0 0 16px; }
   .tabs { display:flex; gap:8px; margin-bottom:16px; }
   .tab { flex:1; padding:12px; border:1px solid var(--line); background:var(--glass); color:var(--ink);
@@ -79,6 +79,24 @@
   .frow button { border:0; background:rgba(0,0,0,.25); color:#fff; border-radius:8px; width:30px; height:30px; cursor:pointer; font-size:14px; }
   button.pick { width:100%; padding:12px; border-radius:10px; border:1px dashed rgba(255,255,255,.6); background:transparent; color:#fff; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
   @media (max-width:520px) { .tabs .tab { font-size:11px; letter-spacing:.03em; padding:12px 4px; } }
+  #add { max-width:760px; margin:0 auto; } #adm { max-width:1000px; margin:0 auto; }
+  textarea { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.95); color:#1e1b4b; font:inherit; font-size:16px; text-transform:uppercase; min-height:84px; resize:vertical; }
+  button.menu { width:100%; padding:18px; margin-bottom:12px; border:0; border-radius:12px; background:#fff; color:#4338ca; font:inherit; font-weight:700; letter-spacing:.1em; font-size:15px; cursor:pointer; }
+  .row2 { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-top:16px; } .row2 button.save { margin-top:0; }
+  .rec { background:var(--glass); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  .rec-h { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; font-size:12px; color:var(--muted); }
+  .rgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0 14px; }
+  .rec label { margin:10px 0 5px; }
+  .afiles .frow { margin-top:6px; } .afiles a.lnk { margin-right:6px; }
+  button.danger { padding:14px; border-radius:10px; border:1px solid #ffb4b4; background:transparent; color:#ffd0d0; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
+  .recbtns { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-top:16px; }
+  .modal { position:fixed; inset:0; background:rgba(15,10,50,.6); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .modal.hidden { display:none; }
+  .mbox { background:#fff; color:#1e1b4b; border-radius:14px; padding:20px; max-width:480px; width:100%; max-height:85vh; overflow:auto; }
+  .mbox h3 { margin:0 0 10px; font-size:15px; letter-spacing:.08em; }
+  .mbox .chg { font-size:13px; margin:5px 0; word-break:break-word; } .mbox .note { font-size:12px; color:#4b4b7a; margin-top:10px; }
+  .mbtns { display:flex; gap:10px; margin-top:16px; } .mbtns button { flex:1; padding:12px; border-radius:10px; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
+  #mno { background:transparent; border:1px solid #6366f1; color:#4338ca; } #myes { background:#4338ca; border:0; color:#fff; }
   .rtools { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
   .rtools button { padding:12px 22px; border:0; border-radius:10px; background:#fff; color:#4338ca; font:inherit; font-weight:700; letter-spacing:.08em; cursor:pointer; }
   .paper { background:#fff; color:#000; border-radius:6px; padding:14px; overflow-x:auto; }
@@ -113,11 +131,12 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>SHBN - STOCK LEDGER &mdash; MINYAK PAKET 1KG</h1>
+  <h1>STOCK LEDGER &mdash; MINYAK PAKET 1KG</h1>
   <div class="tabs">
     <button class="tab active" data-tab="dash">DASHBOARD</button>
     <button class="tab" data-tab="add">ADD RECORD</button>
     <button class="tab" data-tab="rep">SUMMARY REPORT</button>
+    <button class="tab" data-tab="adm">ADMIN</button>
   </div>
 
   <!-- DASHBOARD -->
@@ -132,6 +151,52 @@
   </section>
 
   <!-- ADD RECORD -->
+  <!-- ADMIN -->
+  <section id="adm" class="hidden">
+    <div id="adm-login" class="card">
+      <label style="margin-top:0">ADMIN PASSWORD</label>
+      <input type="password" id="adm-pass" inputmode="numeric" autocomplete="off">
+      <button class="save" id="adm-enter" type="button">ENTER</button>
+      <div class="msg" id="adm-msg"></div>
+    </div>
+    <div id="adm-menu" class="card hidden">
+      <h2>ADMIN</h2>
+      <button class="menu" id="m-header" type="button">UPDATE REPORT HEADER</button>
+      <button class="menu" id="m-records" type="button">UPDATE EXISTING RECORD</button>
+      <button class="clear" id="adm-lock" type="button" style="width:100%">LOCK ADMIN</button>
+    </div>
+    <div id="adm-header" class="card hidden">
+      <h2>UPDATE REPORT HEADER</h2>
+      <label style="margin-top:0">MONTH</label><input type="month" id="ahmonth">
+      <div class="muted" id="ah-note" style="margin-top:8px"></div>
+      <label>NAMA SYARIKAT</label><input type="text" id="ah-company" autocomplete="off">
+      <label>ALAMAT</label><textarea id="ah-address"></textarea>
+      <label>NO. TEL</label><input type="text" id="ah-tel" autocomplete="off">
+      <label>JENIS BARANG KAWALAN</label><input type="text" id="ah-item" autocomplete="off">
+      <label>NO. LESEN CSA</label><input type="text" id="ah-lic" autocomplete="off">
+      <label>TARIKH TAMAT LESEN</label><input type="text" id="ah-exp" autocomplete="off">
+      <div class="row2"><button class="clear" id="ah-back" type="button">BACK</button><button class="save" id="ah-save" type="button">SAVE HEADER</button></div>
+      <div class="msg" id="ah-msg"></div>
+    </div>
+    <div id="adm-records" class="hidden">
+      <div class="card">
+        <h2>UPDATE EXISTING RECORD</h2>
+        <label style="margin-top:0">DATE OF THE RECORD</label>
+        <div class="dwrap"><input type="date" id="ardate"><svg class="cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg></div>
+        <button class="clear" id="ar-back" type="button" style="width:100%;margin-top:12px">BACK</button>
+        <div class="msg" id="ar-msg"></div>
+      </div>
+      <div id="arlist"></div>
+    </div>
+  </section>
+
+  <!-- CONFIRM POPUP -->
+  <div id="modal" class="modal hidden"><div class="mbox">
+    <h3 id="mtitle"></h3><div id="mbody"></div>
+    <input type="text" id="minput" class="hidden" style="margin-top:10px" autocomplete="off">
+    <div class="mbtns"><button id="mno" type="button">CANCEL</button><button id="myes" type="button">CONFIRM</button></div>
+  </div></div>
+
   <!-- SUMMARY REPORT -->
   <section id="rep" class="hidden">
     <div class="rtools"><input type="month" id="rmonth"><button type="button" id="rprint">PRINT REPORT</button></div>
@@ -215,7 +280,8 @@ async function api(path, opts = {}) {
 // ---- Tabs ----
 document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => {
   document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
-  ['dash', 'add', 'rep'].forEach((id) => $(id).classList.toggle('hidden', b.dataset.tab !== id));
+  ['dash', 'add', 'rep', 'adm'].forEach((id) => $(id).classList.toggle('hidden', b.dataset.tab !== id));
+  if (b.dataset.tab !== 'adm') lockAdmin();
   if (b.dataset.tab === 'dash') loadLedger();
   if (b.dataset.tab === 'rep') loadReport();
 });
@@ -503,6 +569,195 @@ window.addEventListener('afterprint', () => {
   document.body.classList.remove('print-report');
   $('rpt').style.zoom = ''; $('rpt').style.width = '';
 });
+
+// ---- Confirmation popup ----
+function confirmBox({ title, html, yes = 'CONFIRM', input = null }) {
+  return new Promise((resolve) => {
+    $('mtitle').textContent = title; $('mbody').innerHTML = html; $('myes').textContent = yes;
+    const inp = $('minput'); inp.classList.toggle('hidden', !input); inp.value = ''; inp.placeholder = input || '';
+    $('modal').classList.remove('hidden'); if (input) inp.focus();
+    const done = (ok) => { $('modal').classList.add('hidden'); $('myes').onclick = $('mno').onclick = null; resolve({ ok, value: inp.value.trim() }); };
+    $('myes').onclick = () => done(true); $('mno').onclick = () => done(false);
+  });
+}
+const showEl = (el, ok, text) => { el.className = 'msg ' + (ok ? 'ok' : 'err'); el.textContent = text; };
+
+// ---- ADMIN (password is checked on the server for every action) ----
+let adminPass = null;
+const adminApi = (body) => api('/api/admin', { method: 'POST', body: JSON.stringify({ ...body, password: adminPass }) });
+const admViews = ['adm-login', 'adm-menu', 'adm-header', 'adm-records'];
+const admView = (id) => admViews.forEach((x) => $(x).classList.toggle('hidden', x !== id));
+function lockAdmin() { adminPass = null; $('adm-pass').value = ''; $('adm-msg').className = 'msg'; $('arlist').innerHTML = ''; admView('adm-login'); }
+
+async function admLogin() {
+  adminPass = $('adm-pass').value;
+  if (!adminPass) { adminPass = null; return show('adm-msg', false, 'ENTER THE PASSWORD'); }
+  try { await adminApi({ action: 'login' }); $('adm-pass').value = ''; $('adm-msg').className = 'msg'; admView('adm-menu'); }
+  catch (e) { adminPass = null; show('adm-msg', false, e.message); }
+}
+$('adm-enter').onclick = admLogin;
+$('adm-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') admLogin(); });
+$('adm-lock').onclick = lockAdmin;
+$('m-header').onclick = () => { admView('adm-header'); $('ahmonth').value = $('ahmonth').value || nowMY.slice(0, 7); $('ah-msg').className = 'msg'; loadHeader(); };
+$('m-records').onclick = () => { admView('adm-records'); $('ar-msg').className = 'msg'; const d = $('ardate'); d.max = todayMY(); if (!d.value) d.value = todayMY(); loadRecs(); };
+$('ah-back').onclick = $('ar-back').onclick = () => admView('adm-menu');
+
+// -- report header (per month) --
+const HF = { company: 'ah-company', address: 'ah-address', tel: 'ah-tel', item: 'ah-item', license_no: 'ah-lic', license_expiry: 'ah-exp' };
+Object.values(HF).forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+$('ahmonth').value = nowMY.slice(0, 7);
+$('ahmonth').onchange = loadHeader;
+const monthLabel = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).toUpperCase(); };
+async function loadHeader() {
+  try {
+    const r = await adminApi({ action: 'header_get', month: $('ahmonth').value });
+    Object.entries(HF).forEach(([k, id]) => { $(id).value = r.header[k] || ''; });
+    $('ah-note').textContent = `CHANGES APPLY FROM ${monthLabel($('ahmonth').value)} ONWARDS. EARLIER MONTHS ARE NOT CHANGED.`
+      + (r.own ? '' : ' (THIS MONTH IS CURRENTLY USING THE HEADER OF AN EARLIER MONTH.)');
+  } catch (e) { showEl($('ah-msg'), false, e.message); }
+}
+$('ah-save').onclick = async () => {
+  const month = $('ahmonth').value, label = monthLabel(month);
+  const header = { company: $('ah-company').value, address: $('ah-address').value, tel: $('ah-tel').value, item: $('ah-item').value,
+                   licenseNo: $('ah-lic').value, licenseExpiry: $('ah-exp').value };
+  const c = await confirmBox({ title: 'SAVE REPORT HEADER?', yes: 'CONFIRM SAVE',
+    html: `<div class="chg">THE NEW HEADER WILL BE USED FOR <b>${label}</b> AND LATER MONTHS.</div><div class="note">REPORTS OF EARLIER MONTHS KEEP THEIR OWN HEADER AND WILL NOT CHANGE.</div>` });
+  if (!c.ok) return;
+  try { await adminApi({ action: 'header_save', month, header }); showEl($('ah-msg'), true, `HEADER SAVED FROM ${label}`); }
+  catch (e) { showEl($('ah-msg'), false, e.message); }
+};
+
+// -- edit existing records --
+const recs = new Map();   // id -> { orig, files }
+const n2 = (x) => (x === '' || x == null ? '' : String(+x));
+const m2 = (x) => (x === '' || x == null ? '' : Number(x).toFixed(2));
+const U = (x) => String(x ?? '').trim().toUpperCase();
+const normOrig = (r) => r.type === 'IN'
+  ? { date: r.date, qty: n2(r.qty), supplier: U(r.supplier), brand: U(r.brand), cost: m2(r.cost), invoiceNo: U(r.invoice_no), invoiceAmount: m2(r.invoice_amount),
+      receiving1: U(r.receiving_1), receiving2: U(r.receiving_2), supervisor: U(r.supervisor), files: (r.files || []).map((f) => f.url).join(',') }
+  : { date: r.date, qty: n2(r.qty), recordedBy: U(r.recorded_by) };
+const normNew = (p, type) => type === 'IN'
+  ? { date: p.date, qty: n2(p.qty), supplier: U(p.supplier), brand: U(p.brand), cost: m2(p.cost), invoiceNo: U(p.invoiceNo), invoiceAmount: m2(p.invoiceAmount),
+      receiving1: U(p.receiving1), receiving2: U(p.receiving2), supervisor: U(p.supervisor), files: (p.files || []).map((f) => f.url).join(',') }
+  : { date: p.date, qty: n2(p.qty), recordedBy: U(p.recordedBy) };
+const LABEL = { date: 'DATE', qty: 'QUANTITY (KG)', supplier: 'SUPPLIER', brand: 'BRAND / PRODUCT', cost: 'COST PER CARTON', invoiceNo: 'INVOICE NO.',
+                invoiceAmount: 'INVOICE AMOUNT', receiving1: 'RECEIVING 1', receiving2: 'RECEIVING 2', supervisor: 'SUPERVISOR', recordedBy: 'RECORD BY', files: 'INVOICE FILES' };
+
+function recHTML(r) {
+  const IN = r.type === 'IN', money = (x) => (x == null ? '' : 'RM ' + rm(x));
+  const f = (label, cls, val, extra = '') => `<div><label>${label}</label><input type="text" class="${cls}" value="${esc(String(val ?? ''))}" autocomplete="off" ${extra}></div>`;
+  const when = new Date(r.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase();
+  return `<div class="rec" data-id="${r.id}">
+    <div class="rec-h"><div><span class="badge">${r.type === 'IN' ? 'INSTOCK' : 'OUTSTOCK'}</span> &nbsp;RECORDED ${when}${r.source === 'EXCEL_IMPORT' ? ' &middot; EXCEL IMPORT' : ''}</div><div>ID ${r.id}</div></div>
+    <div class="rgrid">
+      <div><label>DATE</label><div class="dwrap"><input type="date" class="a-date" value="${r.date}" max="${todayMY()}"><svg class="cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg></div></div>
+      ${f('QUANTITY (KG)', 'a-qty num', n2(r.qty), 'inputmode="decimal"')}
+      ${IN ? f('SUPPLIER', 'a-supplier caps', r.supplier) + f('BRAND / PRODUCT', 'a-brand caps', r.brand) + f('COST PER CARTON', 'a-cost money', money(r.cost), 'inputmode="decimal" placeholder="RM 0.00"')
+          + f('INVOICE NUMBER', 'a-invno caps', r.invoice_no) + f('INVOICE AMOUNT', 'a-amount money', money(r.invoice_amount), 'inputmode="decimal" placeholder="RM 0.00"')
+          + f('RECEIVING 1', 'a-r1 caps', r.receiving_1) + f('RECEIVING 2 (OPTIONAL)', 'a-r2 caps', r.receiving_2) + f('SUPERVISOR', 'a-sup caps', r.supervisor)
+        : f('RECORD BY', 'a-by caps', r.recorded_by)}
+    </div>
+    ${IN ? `<label>INVOICE FILES (MAX 3)</label><div class="afiles"></div>
+      <input type="file" class="a-file hidden" accept="image/*,application/pdf" multiple>
+      <button type="button" class="pick" data-addfile style="margin-top:8px">+ ADD PHOTO / PDF</button>` : ''}
+    <div class="recbtns"><button type="button" class="danger" data-void>VOID RECORD</button><button type="button" class="save" data-save style="margin-top:0">SAVE CHANGES</button></div>
+    <div class="msg" data-msg></div>
+  </div>`;
+}
+function renderAFiles(card) {
+  const st = recs.get(Number(card.dataset.id)); const box = card.querySelector('.afiles'); if (!box) return;
+  box.innerHTML = st.files.map((f, i) => `<div class="frow"><a class="lnk" href="${esc(f.url)}" target="_blank" rel="noopener">${f.type === 'application/pdf' ? 'PDF' : 'PHOTO'} ${i + 1}</a>
+    <div class="nm">${esc(f.name || '')}</div><button type="button" data-rmfile="${i}" title="REMOVE">&#10005;</button></div>`).join('') || '<div class="muted">NO FILES</div>';
+  card.querySelector('[data-addfile]').disabled = st.files.length >= 3;
+}
+async function loadRecs() {
+  try {
+    const r = await adminApi({ action: 'records_get', date: $('ardate').value });
+    recs.clear();
+    $('arlist').innerHTML = r.records.map(recHTML).join('') || `<div class="card muted">NO RECORDS ON ${dmy($('ardate').value)}</div>`;
+    r.records.forEach((x) => recs.set(x.id, { orig: x, files: (x.files || []).map((f) => ({ ...f })) }));
+    $('arlist').querySelectorAll('.rec').forEach(renderAFiles);
+  } catch (e) { showEl($('ar-msg'), false, e.message); }
+}
+$('ardate').onchange = () => { $('ar-msg').className = 'msg'; loadRecs(); };
+$('ardate').addEventListener('click', (e) => { try { e.target.showPicker(); } catch { /* older browsers */ } });
+
+const list = $('arlist');
+list.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.classList.contains('caps')) t.value = t.value.toUpperCase();
+  if (t.classList.contains('money')) t.value = maskRM(t.value);
+  if (t.classList.contains('num')) { const v = t.value.replace(/[^\d.]/g, '').split('.'); t.value = v.length > 1 ? v[0] + '.' + v.slice(1).join('').slice(0, 2) : v[0]; }
+});
+list.addEventListener('focusout', (e) => {
+  const t = e.target; if (!t.classList.contains('money') || !t.value) return;
+  const [i, d = ''] = t.value.replace('RM ', '').split('.'); t.value = 'RM ' + (i || '0') + '.' + (d + '00').slice(0, 2);
+});
+list.addEventListener('click', async (e) => {
+  const card = e.target.closest('.rec'); if (!card) return;
+  const d = e.target.closest('input[type=date]'); if (d) { try { d.showPicker(); } catch { /* older browsers */ } return; }
+  const st = recs.get(Number(card.dataset.id)), msg = card.querySelector('[data-msg]');
+  if (e.target.closest('[data-addfile]')) return card.querySelector('.a-file').click();
+  const rm_ = e.target.closest('[data-rmfile]');
+  if (rm_) { st.files.splice(Number(rm_.dataset.rmfile), 1); return renderAFiles(card); }
+  if (e.target.closest('[data-save]')) return saveRec(card, st, msg);
+  if (e.target.closest('[data-void]')) return voidRec(card, st, msg);
+});
+list.addEventListener('change', async (e) => {
+  if (!e.target.classList.contains('a-file')) return;
+  const card = e.target.closest('.rec'), st = recs.get(Number(card.dataset.id)), msg = card.querySelector('[data-msg]');
+  const files = [...e.target.files]; e.target.value = '';
+  for (const f of files) {
+    if (st.files.length >= 3) { showEl(msg, false, 'MAXIMUM 3 FILES'); break; }
+    try {
+      showEl(msg, true, `UPLOADING ${f.name}...`);
+      let blob = f, type = f.type, name = f.name;
+      if (f.type === 'application/pdf') { if (f.size > PDF_MAX) throw new Error('PDF TOO LARGE (MAX 3 MB)'); }
+      else if (f.type.startsWith('image/')) { blob = await shrink(f); type = 'image/jpeg'; name = f.name.replace(/\.\w+$/, '') + '.jpg'; }
+      else throw new Error('ONLY PHOTO OR PDF');
+      st.files.push(await api('/api/upload', { method: 'POST', body: JSON.stringify({ name, type, data: await toBase64(blob) }) }));
+      msg.className = 'msg'; renderAFiles(card);
+    } catch (err) { showEl(msg, false, err.message); }
+  }
+});
+
+function collect(card, st) {
+  const v = (c) => (card.querySelector('.' + c)?.value ?? '').trim();
+  const m = (c) => v(c).replace(/[^\d.]/g, '');
+  const p = { date: v('a-date'), qty: v('a-qty') };
+  if (st.orig.type === 'IN') Object.assign(p, { supplier: v('a-supplier'), brand: v('a-brand'), cost: m('a-cost'), invoiceNo: v('a-invno'), invoiceAmount: m('a-amount'),
+    receiving1: v('a-r1'), receiving2: v('a-r2'), supervisor: v('a-sup'), files: st.files });
+  else p.recordedBy = v('a-by');
+  return p;
+}
+async function saveRec(card, st, msg) {
+  const type = st.orig.type, payload = collect(card, st);
+  const a = normOrig(st.orig), b = normNew(payload, type);
+  const changes = Object.keys(b).filter((k) => a[k] !== b[k]);
+  if (!changes.length) return showEl(msg, false, 'NO CHANGES TO SAVE');
+  const line = (k) => k === 'files' ? `<div class="chg"><b>${LABEL[k]}:</b> ${(st.orig.files || []).length} FILE(S) &rarr; ${payload.files.length} FILE(S)</div>`
+    : `<div class="chg"><b>${LABEL[k]}:</b> ${esc(a[k] || '-')} &rarr; ${esc(b[k] || '-')}</div>`;
+  const stockChange = changes.includes('qty') || changes.includes('date');
+  const c = await confirmBox({ title: 'SAVE CHANGES TO THIS RECORD?', yes: 'CONFIRM SAVE',
+    html: changes.map(line).join('') + (stockChange ? '<div class="note">THE BALANCES OF THIS DAY AND ALL LATER DAYS WILL BE RECALCULATED.</div>' : '') });
+  if (!c.ok) return;
+  try {
+    const r = await adminApi({ action: 'record_save', id: st.orig.id, data: payload });
+    await loadRecs(); showEl($('ar-msg'), true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) { showEl(msg, false, e.message); }
+}
+async function voidRec(card, st, msg) {
+  const o = st.orig;
+  const c = await confirmBox({ title: 'VOID THIS RECORD?', yes: 'CONFIRM VOID', input: 'REASON (REQUIRED)',
+    html: `<div class="chg"><b>${o.type === 'IN' ? 'INSTOCK' : 'OUTSTOCK'}</b> ${fmt(o.qty)} KG ON ${dmy(o.date)}</div><div class="note">THE RECORD WILL BE REMOVED FROM THE BALANCES AND REPORTS. IT STAYS IN THE AUDIT LOG.</div>` });
+  if (!c.ok) return;
+  try {
+    const r = await adminApi({ action: 'record_void', id: o.id, reason: c.value });
+    await loadRecs(); showEl($('ar-msg'), true, `RECORD VOIDED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) { showEl(msg, false, e.message); }
+}
 
 loadLedger();
 </script>
