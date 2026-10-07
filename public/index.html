@@ -306,16 +306,17 @@ const fileLinks = (e) => (e.files || []).filter((f) => String(f.url).startsWith(
 const dmy = (iso) => iso.split('-').reverse().join('/');
 function detailHTML(e) {
   const recDay = new Date(e.ts).toLocaleDateString('en-CA', { timeZone: TZ });
-  const late = recDay !== e.date;                       // recorded on a later day than the movement
+  const imp = e.source === 'EXCEL_IMPORT';
+  const late = !imp && recDay !== e.date;                       // recorded on a later day than the movement
   const lateKv = late ? kv('RECORDED ON', dmy(recDay) + ' ' + timeOf(e.ts)) : '';
-  const head = `<div class="det-h"><div><span class="badge">${e.type}</span> ${late ? '<span class="badge late-tag">LATE ENTRY</span>' : '&nbsp;' + timeOf(e.ts)}</div>
+  const head = `<div class="det-h"><div><span class="badge">${e.type}</span> ${imp ? '<span class="badge">EXCEL IMPORT</span>' : late ? '<span class="badge late-tag">LATE ENTRY</span>' : '&nbsp;' + timeOf(e.ts)}</div>
     <b class="${e.type === 'IN' ? 'in' : 'out'}">${e.type === 'IN' ? '+' : '-'}${fmt(e.qty)} KG</b></div>`;
   const body = e.type === 'IN'
     ? kv('SUPPLIER', e.supplier) + kv('BRAND / PRODUCT', e.brand) + kv('COST PER CARTON', e.cost == null ? '' : 'RM ' + rm(e.cost)) + kv('INVOICE NO.', e.invoice_no) + kv('INVOICE AMOUNT', e.invoice_amount == null ? '' : 'RM ' + rm(e.invoice_amount))
       + kv('RECEIVING 1', e.receiving_1) + kv('RECEIVING 2', e.receiving_2) + kv('SUPERVISOR', e.supervisor)
       + `<div><span>INVOICE FILES</span><b>${fileLinks(e) || '-'}</b></div>` + lateKv
-    : kv('TIMESTAMP', new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase())
-      + kv('RECORD BY', e.recorded_by) + lateKv;
+    : kv('TIMESTAMP', imp ? '' : new Date(e.ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).toUpperCase())
+      + kv('RECORD BY', e.recorded_by) + (e.sales_ref ? kv('NO. INVOIS / REMARK', e.sales_ref) : '') + lateKv;
   return `<div class="det">${head}<div class="kv">${body}</div></div>`;
 }
 
@@ -528,7 +529,7 @@ function reportHTML(r) {
       <td class="${multi}">${names}</td><td class="${multi}">${invs}</td>
       <td>${x.in > 0 ? kgTxt(x.in) : ''}</td><td>${lines(costs)}</td>
       <td>${amts.length ? money2(amts.reduce((t, b) => t + Number(b.amount), 0)) : ''}</td>
-      <td>${kgTxt(x.semasa)}</td><td></td>
+      <td>${kgTxt(x.semasa)}</td><td>${(x.out_refs || []).map((t) => esc(String(t)).replace(/\n/g, '<br>')).join('<br>')}</td>
       <td>${x.out > 0 ? kgTxt(x.out) : ''}</td><td>${lines(prices)}</td>
       <td>${x.out > 0 ? money2(x.out_amount) : ''}</td><td>${kgTxt(x.closing)}</td></tr>`;
   }).join('');
@@ -635,13 +636,13 @@ const U = (x) => String(x ?? '').trim().toUpperCase();
 const normOrig = (r) => r.type === 'IN'
   ? { date: r.date, qty: n2(r.qty), supplier: U(r.supplier), brand: U(r.brand), cost: m2(r.cost), invoiceNo: U(r.invoice_no), invoiceAmount: m2(r.invoice_amount),
       receiving1: U(r.receiving_1), receiving2: U(r.receiving_2), supervisor: U(r.supervisor), files: (r.files || []).map((f) => f.url).join(',') }
-  : { date: r.date, qty: n2(r.qty), recordedBy: U(r.recorded_by) };
+  : { date: r.date, qty: n2(r.qty), recordedBy: U(r.recorded_by), salesRef: U(r.sales_ref) };
 const normNew = (p, type) => type === 'IN'
   ? { date: p.date, qty: n2(p.qty), supplier: U(p.supplier), brand: U(p.brand), cost: m2(p.cost), invoiceNo: U(p.invoiceNo), invoiceAmount: m2(p.invoiceAmount),
       receiving1: U(p.receiving1), receiving2: U(p.receiving2), supervisor: U(p.supervisor), files: (p.files || []).map((f) => f.url).join(',') }
-  : { date: p.date, qty: n2(p.qty), recordedBy: U(p.recordedBy) };
+  : { date: p.date, qty: n2(p.qty), recordedBy: U(p.recordedBy), salesRef: U(p.salesRef) };
 const LABEL = { date: 'DATE', qty: 'QUANTITY (KG)', supplier: 'SUPPLIER', brand: 'BRAND / PRODUCT', cost: 'COST PER CARTON', invoiceNo: 'INVOICE NO.',
-                invoiceAmount: 'INVOICE AMOUNT', receiving1: 'RECEIVING 1', receiving2: 'RECEIVING 2', supervisor: 'SUPERVISOR', recordedBy: 'RECORD BY', files: 'INVOICE FILES' };
+                invoiceAmount: 'INVOICE AMOUNT', receiving1: 'RECEIVING 1', receiving2: 'RECEIVING 2', supervisor: 'SUPERVISOR', recordedBy: 'RECORD BY', salesRef: 'NO. INVOIS JUALAN / REMARK', files: 'INVOICE FILES' };
 
 function recHTML(r) {
   const IN = r.type === 'IN', money = (x) => (x == null ? '' : 'RM ' + rm(x));
@@ -655,7 +656,7 @@ function recHTML(r) {
       ${IN ? f('SUPPLIER', 'a-supplier caps', r.supplier) + f('BRAND / PRODUCT', 'a-brand caps', r.brand) + f('COST PER CARTON', 'a-cost money', money(r.cost), 'inputmode="decimal" placeholder="RM 0.00"')
           + f('INVOICE NUMBER', 'a-invno caps', r.invoice_no) + f('INVOICE AMOUNT', 'a-amount money', money(r.invoice_amount), 'inputmode="decimal" placeholder="RM 0.00"')
           + f('RECEIVING 1', 'a-r1 caps', r.receiving_1) + f('RECEIVING 2 (OPTIONAL)', 'a-r2 caps', r.receiving_2) + f('SUPERVISOR', 'a-sup caps', r.supervisor)
-        : f('RECORD BY', 'a-by caps', r.recorded_by)}
+        : f('RECORD BY', 'a-by caps', r.recorded_by) + `<div style="grid-column:1/-1"><label>NO. INVOIS JUALAN / REMARK (SHOWN IN THE SUMMARY REPORT)</label><textarea class="a-sref caps" style="min-height:70px">${esc(r.sales_ref || '')}</textarea></div>`}
     </div>
     ${IN ? `<label>INVOICE FILES (MAX 3)</label><div class="afiles"></div>
       <input type="file" class="a-file hidden" accept="image/*,application/pdf" multiple>
@@ -727,7 +728,7 @@ function collect(card, st) {
   const p = { date: v('a-date'), qty: v('a-qty') };
   if (st.orig.type === 'IN') Object.assign(p, { supplier: v('a-supplier'), brand: v('a-brand'), cost: m('a-cost'), invoiceNo: v('a-invno'), invoiceAmount: m('a-amount'),
     receiving1: v('a-r1'), receiving2: v('a-r2'), supervisor: v('a-sup'), files: st.files });
-  else p.recordedBy = v('a-by');
+  else { p.recordedBy = v('a-by'); p.salesRef = (card.querySelector('.a-sref')?.value || '').trim(); }
   return p;
 }
 async function saveRec(card, st, msg) {
