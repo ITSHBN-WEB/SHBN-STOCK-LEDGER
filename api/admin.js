@@ -8,6 +8,7 @@ import { cleanFileRefs } from '../lib/files.js';
 //   POST { password, action: 'header_save', month: 'YYYY-MM', header: { company, address, tel, item, licenseNo, licenseExpiry } }
 //   POST { password, action: 'records_get', date: 'YYYY-MM-DD' }
 //   POST { password, action: 'record_save', id, data: { date, qty, supplier, brand, cost, invoiceNo, invoiceAmount, receiving1, receiving2, supervisor, recordedBy, files } }
+//   (record_save for OUTSTOCK also takes data.salesRef: the sales invoice no. / remark shown in the report)
 //   POST { password, action: 'record_void', id, reason }
 
 const sha = (v) => createHash('sha256').update(String(v ?? '')).digest();
@@ -106,6 +107,7 @@ export default async function handler(req, res) {
         } else {
           if (strict && blank(d.recordedBy)) return res.status(400).json({ error: 'RECORD BY IS REQUIRED' });
           data.recorded_by = up(d.recordedBy);
+          data.sales_ref = String(d.salesRef ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join('\n').toUpperCase().slice(0, 300);
         }
         const r = await sql`SELECT admin_update_entry(${id}, ${JSON.stringify(data)}::jsonb) AS result`;
         return res.status(200).json(r[0].result);
