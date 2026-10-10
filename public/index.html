@@ -114,12 +114,41 @@
   .rpt tr.foot td { height:20px; font-size:12px; font-weight:700; }
   .rpt td.grey { background:#a6a6a6; text-align:right; padding-right:6px; } .rpt td.black { background:#000; }
   .rpt td.val { font-weight:400; font-size:12px; }
+  /* ledger switch (title) + banners */
+  .pwrap { position:relative; display:inline-block; }
+  #prodbtn { font:inherit; letter-spacing:inherit; color:#4338ca; background:#fff; border:0; border-radius:8px; padding:5px 12px; cursor:pointer; }
+  #prodmenu { position:absolute; left:0; top:calc(100% + 6px); background:#fff; border-radius:10px; min-width:100%; z-index:20; box-shadow:0 8px 24px rgba(0,0,0,.3); overflow:hidden; white-space:nowrap; }
+  #prodmenu button { display:block; width:100%; text-align:left; padding:13px 16px; border:0; background:transparent; color:#1e1b4b; font:inherit; letter-spacing:.08em; font-weight:700; cursor:pointer; }
+  #prodmenu button.on { background:#e0e7ff; }
+  .pname { display:inline-block; background:rgba(0,0,0,.22); border-radius:99px; padding:5px 12px; font-size:12px; font-weight:700; letter-spacing:.1em; margin-bottom:6px; }
+  /* AUDIT */
+  #aud { max-width:760px; margin:0 auto; }
+  .disc { margin-top:12px; padding:12px; border-radius:10px; background:rgba(0,0,0,.2); font-weight:700; letter-spacing:.05em; font-size:14px; }
+  .disc.short { background:rgba(255,120,120,.3); } .disc.excess { background:rgba(255,210,122,.3); } .disc.zero { background:rgba(126,240,176,.25); }
+  .audpaper { background:#fff; color:#000; border-radius:6px; padding:22px; font-family:Calibri,Carlito,Arial,sans-serif; }
+  .audpaper h3 { text-align:center; font-size:17px; letter-spacing:.08em; margin:0 0 4px; color:#000; }
+  .audpaper .asub { text-align:center; font-size:12px; margin-bottom:16px; color:#000; }
+  .audpaper table { min-width:0; width:100%; border-collapse:collapse; font-size:14px; }
+  .audpaper th, .audpaper td { color:#000; border:1px solid #000; padding:9px 10px; text-align:left; vertical-align:top; font-size:14px; letter-spacing:0; }
+  .audpaper th { width:42%; background:#d9d9d9; font-weight:700; }
+  .audpaper td { font-weight:400; word-break:break-word; white-space:pre-line; }
+  .audpaper tr.dr td { font-weight:700; }
+  .hrow { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.12); font-size:13px; }
+  .hrow button { border:1px solid var(--line); background:transparent; color:#fff; border-radius:8px; padding:8px 14px; font:inherit; font-size:12px; font-weight:700; letter-spacing:.08em; cursor:pointer; }
+  body.print-audit::before { background:#fff; }
+  body.print-audit .wrap { max-width:none; padding:0; }
+  body.print-audit h1, body.print-audit .tabs, body.print-audit #dash, body.print-audit #add, body.print-audit #rep, body.print-audit #adm,
+  body.print-audit #audform, body.print-audit #audhist, body.print-audit .rtools { display:none !important; }
+  body.print-audit #aud { display:block !important; max-width:none; }
+  body.print-audit #audres { display:block !important; }
+  body.print-audit .audpaper { padding:0; border-radius:0; }
+  body.print-audit .audpaper th { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   @page { size: A4 landscape; margin: 8mm; }
   /* Print mode: these rules are class-based (not only @media print) so the page can be measured and
      scaled to ONE sheet before the print dialog opens. */
   body.print-report::before { background:#fff; }
   body.print-report .wrap { max-width:none; padding:0; }
-  body.print-report h1, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report .rtools { display:none !important; }
+  body.print-report h1, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report #aud, body.print-report #adm, body.print-report .rtools { display:none !important; }
   body.print-report #rep { display:block !important; }
   body.print-report .paper { padding:0; border-radius:0; overflow:visible; }
   body.print-report .rpt { min-width:0; width:281mm; font-size:8pt; }
@@ -131,12 +160,13 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>STOCK LEDGER &mdash; MINYAK PAKET 1KG</h1>
+  <h1>STOCK LEDGER &mdash; <span class="pwrap"><button type="button" id="prodbtn" aria-haspopup="true"><span id="prodname"></span> &#9662;</button><div id="prodmenu" class="hidden"></div></span></h1>
   <div class="tabs">
     <button class="tab active" data-tab="dash">DASHBOARD</button>
     <button class="tab" data-tab="add">ADD RECORD</button>
     <button class="tab" data-tab="rep">SUMMARY REPORT</button>
     <button class="tab" data-tab="adm">ADMIN</button>
+    <button class="tab" data-tab="aud">AUDIT</button>
   </div>
 
   <!-- DASHBOARD -->
@@ -153,6 +183,7 @@
   <!-- ADD RECORD -->
   <!-- ADMIN -->
   <section id="adm" class="hidden">
+    <div class="pname"></div>
     <div id="adm-login" class="card">
       <label style="margin-top:0">ADMIN PASSWORD</label>
       <input type="password" id="adm-pass" inputmode="numeric" autocomplete="off">
@@ -163,6 +194,7 @@
       <h2>ADMIN</h2>
       <button class="menu" id="m-header" type="button">UPDATE REPORT HEADER</button>
       <button class="menu" id="m-records" type="button">UPDATE EXISTING RECORD</button>
+      <button class="menu" id="m-price" type="button">UPDATE SALE PRICE PER KG</button>
       <button class="clear" id="adm-lock" type="button" style="width:100%">LOCK ADMIN</button>
     </div>
     <div id="adm-header" class="card hidden">
@@ -178,6 +210,14 @@
       <div class="row2"><button class="clear" id="ah-back" type="button">BACK</button><button class="save" id="ah-save" type="button">SAVE HEADER</button></div>
       <div class="msg" id="ah-msg"></div>
     </div>
+    <div id="adm-price" class="card hidden">
+      <h2>UPDATE SALE PRICE PER KG</h2>
+      <div class="muted" id="ap-cur" style="margin-bottom:6px"></div>
+      <label style="margin-top:0">NEW PRICE PER KG</label><input type="text" id="ap-price" inputmode="decimal" placeholder="RM 0.00" autocomplete="off">
+      <div class="note muted" style="margin-top:8px">THE PRICE IS USED IN THE SUMMARY REPORT FOR SALES THAT HAVE NO PRICE OF THEIR OWN. EARLIER SALES WITH A SAVED PRICE ARE NOT CHANGED.</div>
+      <div class="row2"><button class="clear" id="ap-back" type="button">BACK</button><button class="save" id="ap-save" type="button">SAVE PRICE</button></div>
+      <div class="msg" id="ap-msg"></div>
+    </div>
     <div id="adm-records" class="hidden">
       <div class="card">
         <h2>UPDATE EXISTING RECORD</h2>
@@ -188,6 +228,28 @@
       </div>
       <div id="arlist"></div>
     </div>
+  </section>
+
+  <!-- AUDIT / STOCKTAKE -->
+  <section id="aud" class="hidden">
+    <div id="audform">
+      <div class="pname"></div>
+      <div class="card balance"><small>CURRENT BALANCE STOCK</small><div class="num"><span id="aud-bal">-</span> KG</div></div>
+      <div class="card">
+        <label style="margin-top:0">SAP BALANCE STOCK (KG)</label><input type="text" id="aud-sap" inputmode="decimal" autocomplete="off">
+        <label>PHYSICAL COUNT QUANTITY (KG)</label><input type="text" id="aud-phy" inputmode="decimal" autocomplete="off">
+        <div class="disc hidden" id="aud-disc"></div>
+        <label>REMARK <span class="opt">(OPTIONAL)</span></label><textarea id="aud-remark" class="caps" maxlength="500"></textarea>
+        <label>SUBMIT BY</label><input type="text" id="aud-by" class="caps" autocomplete="off">
+        <div class="actions"><button class="clear" id="aud-clear" type="button">CLEAR</button><button class="save" id="aud-submit" type="button">SUBMIT</button></div>
+        <div class="msg" id="aud-msg"></div>
+      </div>
+    </div>
+    <div id="audres" class="hidden">
+      <div class="rtools"><button type="button" id="aud-new">NEW STOCKTAKE</button><button type="button" id="aud-print">PRINT REPORT</button></div>
+      <div class="audpaper" id="audrpt"></div>
+    </div>
+    <div class="card" id="audhist"><h2>PREVIOUS STOCKTAKES</h2><div id="audlist"><div class="muted">LOADING...</div></div></div>
   </section>
 
   <!-- CONFIRM POPUP -->
@@ -204,6 +266,7 @@
   </section>
 
   <section id="add" class="hidden">
+    <div class="pname"></div>
     <div class="card">
       <div class="sub">
         <button class="tab active" data-sub="in">INSTOCK</button>
@@ -247,6 +310,7 @@
         <div id="fields-out" class="hidden">
         <label>QUANTITY (KG)</label><input type="text" id="qty-out" inputmode="decimal" autocomplete="off">
         <label>RECORD BY</label><input type="text" id="recby" class="caps" autocomplete="off">
+        <label>REMARK <span class="opt">(OPTIONAL)</span></label><input type="text" id="remark" class="caps" maxlength="200" autocomplete="off">
         <div class="actions"><button class="clear" id="clear-out" type="button">CLEAR</button><button class="save" id="save-out">SAVE OUTSTOCK</button></div>
         </div>
         <div class="msg" id="msg-out"></div>
@@ -258,6 +322,10 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const TZ = 'Asia/Kuala_Lumpur';
+const PRODUCTS = [{ code: 'MINYAK', name: 'MINYAK PAKET 1KG' }, { code: 'GULA', name: 'GULA KASAR PUTIH' }];
+let product = 'MINYAK';
+try { const sv = localStorage.getItem('ledger'); if (PRODUCTS.some((x) => x.code === sv)) product = sv; } catch { /* storage blocked: default ledger */ }
+const prodName = () => PRODUCTS.find((x) => x.code === product).name;
 const fmt = (n) => Number(n).toLocaleString('en-MY', { maximumFractionDigits: 2 });
 const rm  = (n) => n == null ? '' : Number(n).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -278,13 +346,17 @@ async function api(path, opts = {}) {
 }
 
 // ---- Tabs ----
-document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => {
-  document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
-  ['dash', 'add', 'rep', 'adm'].forEach((id) => $(id).classList.toggle('hidden', b.dataset.tab !== id));
-  if (b.dataset.tab !== 'adm') lockAdmin();
-  if (b.dataset.tab === 'dash') loadLedger();
-  if (b.dataset.tab === 'rep') loadReport();
-});
+const TABS = ['dash', 'add', 'rep', 'adm', 'aud'];
+const activeTab = () => document.querySelector('[data-tab].active').dataset.tab;
+function showTab(t) {
+  document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x.dataset.tab === t));
+  TABS.forEach((id) => $(id).classList.toggle('hidden', t !== id));
+  if (t !== 'adm') lockAdmin();
+  if (t === 'dash') loadLedger();
+  if (t === 'rep') loadReport();
+  if (t === 'aud') loadAudit();
+}
+document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
 document.querySelectorAll('[data-sub]').forEach((b) => b.onclick = () => {
   document.querySelectorAll('[data-sub]').forEach((x) => x.classList.toggle('active', x === b));
   $('sub-in').classList.toggle('hidden', b.dataset.sub !== 'in');
@@ -341,7 +413,7 @@ $('days').addEventListener('click', (ev) => {
 
 async function loadLedger() {
   try {
-    lastData = await api('/api/ledger?month=' + $('month').value);
+    lastData = await api('/api/ledger?product=' + product + '&month=' + $('month').value);
     maxBack = lastData.max_backdate_days || 31; ['in', 'out'].forEach(limits);
     renderLedger();
   } catch (e) { $('bal').textContent = '!'; alert(e.message); }
@@ -349,7 +421,7 @@ async function loadLedger() {
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ---- Inputs: ALL CAPS, quantity, RM 1,234.56 ----
-['supplier', 'brand', 'invno', 'rcv1', 'rcv2', 'sup', 'recby'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+['supplier', 'brand', 'invno', 'rcv1', 'rcv2', 'sup', 'recby', 'remark', 'aud-by', 'aud-remark'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
 ['qty-in', 'qty-out'].forEach((id) => $(id).addEventListener('input', (e) => {
   let v = e.target.value.replace(/[^\d.]/g, ''); const p = v.split('.');
   e.target.value = p.length > 1 ? p[0] + '.' + p.slice(1).join('').slice(0, 2) : v;
@@ -476,7 +548,7 @@ $('files').addEventListener('change', async (ev) => {
 });
 
 const clearIn  = () => { ['supplier', 'brand', 'cost', 'invno', 'amount', 'qty-in', 'rcv1', 'rcv2', 'sup'].forEach((i) => $(i).value = ''); resetFiles(); };
-const clearOut = () => { ['qty-out', 'recby'].forEach((i) => $(i).value = ''); };
+const clearOut = () => { ['qty-out', 'recby', 'remark'].forEach((i) => $(i).value = ''); };
 $('clear-in').onclick  = () => { clearIn();  $('msg-in').className = 'msg'; startDate('in'); };
 $('clear-out').onclick = () => { clearOut(); $('msg-out').className = 'msg'; startDate('out'); };
 
@@ -494,7 +566,7 @@ $('save-in').onclick = async () => {
       p.uploaded = await api('/api/upload', { method: 'POST', body: JSON.stringify({ name: p.name, type: p.type, data: await toBase64(p.blob) }) });
     }
     const r = await api('/api/entries', { method: 'POST', body: JSON.stringify({
-      type: 'IN', date: confirmed.in, supplier: v('supplier'), brand: v('brand'), costPerCarton: costValue(), invoiceNo: v('invno'), invoiceAmount: amountValue(), quantity: v('qty-in'),
+      product, type: 'IN', date: confirmed.in, supplier: v('supplier'), brand: v('brand'), costPerCarton: costValue(), invoiceNo: v('invno'), invoiceAmount: amountValue(), quantity: v('qty-in'),
       receiving1: v('rcv1'), receiving2: v('rcv2'), supervisor: v('sup'), files: picked.map((p) => p.uploaded), key: keyIn }) });
     show('msg-in', true, `SAVED. CURRENT BALANCE: ${fmt(r.balance)} KG`);
     clearIn(); startDate('in'); keyIn = crypto.randomUUID();
@@ -502,7 +574,7 @@ $('save-in').onclick = async () => {
   finally { btn.disabled = false; }
 };
 $('save-out').onclick = () => !confirmed.out ? show('msg-out', false, 'CONFIRM THE DATE FIRST') : submit('save-out', 'msg-out',
-  { type: 'OUT', date: confirmed.out, quantity: $('qty-out').value, recordedBy: $('recby').value, key: keyOut },
+  { product, type: 'OUT', date: confirmed.out, quantity: $('qty-out').value, recordedBy: $('recby').value, remark: $('remark').value, key: keyOut },
   () => { clearOut(); startDate('out'); keyOut = crypto.randomUUID(); });
 
 // ---- Summary report (same layout and wording as the Excel sheet) ----
@@ -523,7 +595,8 @@ function reportHTML(r) {
     const invs  = x.buys.map((b) => `<div class="blk">${esc(b.invoice_no || '')}</div>`).join('');
     const costs = [...new Set(x.buys.filter((b) => b.cost != null).map((b) => Number(b.cost).toFixed(2)))];
     const amts  = x.buys.filter((b) => b.amount != null);
-    const prices = (x.out_prices.length ? x.out_prices : [r.price]).map(money2);
+    const priced = (x.out_prices || []).filter((p) => p != null);
+    const prices = (priced.length ? priced : r.price != null ? [r.price] : []).map(money2);
     const multi = x.buys.length > 1 ? ' multi' : '';
     return `<tr><td>${dmyNoPad(x.date)}</td><td>${kgTxt(x.opening)}</td>
       <td class="${multi}">${names}</td><td class="${multi}">${invs}</td>
@@ -531,7 +604,7 @@ function reportHTML(r) {
       <td>${amts.length ? money2(amts.reduce((t, b) => t + Number(b.amount), 0)) : ''}</td>
       <td>${kgTxt(x.semasa)}</td><td>${(x.out_refs || []).map((t) => esc(String(t)).replace(/\n/g, '<br>')).join('<br>')}</td>
       <td>${x.out > 0 ? kgTxt(x.out) : ''}</td><td>${lines(prices)}</td>
-      <td>${x.out > 0 ? money2(x.out_amount) : ''}</td><td>${kgTxt(x.closing)}</td></tr>`;
+      <td>${x.out > 0 && x.out_amount != null && prices.length ? money2(x.out_amount) : ''}</td><td>${kgTxt(x.closing)}</td></tr>`;
   }).join('');
   const widths = [11, 9, 22,  10.9, 9, 7.5, 8.5, 13.5, 11.7, 9, 7.5, 10.6, 9];
   const sum = widths.reduce((a, b) => a + b, 0);
@@ -552,7 +625,7 @@ function reportHTML(r) {
 }
 async function loadReport() {
   try {
-    const r = await api('/api/report?month=' + $('rmonth').value);
+    const r = await api('/api/report?product=' + product + '&month=' + $('rmonth').value);
     $('rpt').innerHTML = reportHTML(r);
   } catch (e) { $('rpt').innerHTML = `<div style="color:#b00020;font-weight:700">${esc(e.message)}</div>`; }
 }
@@ -567,7 +640,7 @@ $('rprint').onclick = () => {
   window.print();
 };
 window.addEventListener('afterprint', () => {
-  document.body.classList.remove('print-report');
+  document.body.classList.remove('print-report', 'print-audit'); $('pgstyle')?.remove();
   $('rpt').style.zoom = ''; $('rpt').style.width = '';
 });
 
@@ -585,8 +658,8 @@ const showEl = (el, ok, text) => { el.className = 'msg ' + (ok ? 'ok' : 'err'); 
 
 // ---- ADMIN (password is checked on the server for every action) ----
 let adminPass = null;
-const adminApi = (body) => api('/api/admin', { method: 'POST', body: JSON.stringify({ ...body, password: adminPass }) });
-const admViews = ['adm-login', 'adm-menu', 'adm-header', 'adm-records'];
+const adminApi = (body) => api('/api/admin', { method: 'POST', body: JSON.stringify({ ...body, product, password: adminPass }) });
+const admViews = ['adm-login', 'adm-menu', 'adm-header', 'adm-records', 'adm-price'];
 const admView = (id) => admViews.forEach((x) => $(x).classList.toggle('hidden', x !== id));
 function lockAdmin() { adminPass = null; $('adm-pass').value = ''; $('adm-msg').className = 'msg'; $('arlist').innerHTML = ''; admView('adm-login'); }
 
@@ -601,7 +674,21 @@ $('adm-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') admLog
 $('adm-lock').onclick = lockAdmin;
 $('m-header').onclick = () => { admView('adm-header'); $('ahmonth').value = $('ahmonth').value || nowMY.slice(0, 7); $('ah-msg').className = 'msg'; loadHeader(); };
 $('m-records').onclick = () => { admView('adm-records'); $('ar-msg').className = 'msg'; const d = $('ardate'); d.max = todayMY(); if (!d.value) d.value = todayMY(); loadRecs(); };
-$('ah-back').onclick = $('ar-back').onclick = () => admView('adm-menu');
+$('ah-back').onclick = $('ar-back').onclick = $('ap-back').onclick = () => admView('adm-menu');
+$('ap-price').addEventListener('input', (e) => { e.target.value = maskRM(e.target.value); });
+$('m-price').onclick = async () => {
+  admView('adm-price'); $('ap-msg').className = 'msg'; $('ap-price').value = '';
+  try { const r = await adminApi({ action: 'price_get' }); $('ap-cur').textContent = r.price == null ? 'CURRENT PRICE: NOT SET' : `CURRENT PRICE: RM ${rm(r.price)} PER KG`; $('ap-price').value = r.price == null ? '' : maskRM(Number(r.price).toFixed(2)); }
+  catch (e) { showEl($('ap-msg'), false, e.message); }
+};
+$('ap-save').onclick = async () => {
+  const price = $('ap-price').value.replace(/[^\d.]/g, '');
+  if (!Number(price)) return showEl($('ap-msg'), false, 'ENTER A VALID PRICE PER KG');
+  const c = await confirmBox({ title: 'SAVE SALE PRICE?', yes: 'CONFIRM SAVE', html: `<div class="chg"><b>${prodName()}</b>: RM ${rm(price)} PER KG</div><div class="note">USED IN THE SUMMARY REPORT FOR SALES THAT HAVE NO PRICE OF THEIR OWN.</div>` });
+  if (!c.ok) return;
+  try { await adminApi({ action: 'price_save', price }); $('ap-cur').textContent = `CURRENT PRICE: RM ${rm(price)} PER KG`; showEl($('ap-msg'), true, 'PRICE SAVED'); }
+  catch (e) { showEl($('ap-msg'), false, e.message); }
+};
 
 // -- report header (per month) --
 const HF = { company: 'ah-company', address: 'ah-address', tel: 'ah-tel', item: 'ah-item', license_no: 'ah-lic', license_expiry: 'ah-exp' };
@@ -760,6 +847,86 @@ async function voidRec(card, st, msg) {
   } catch (e) { showEl(msg, false, e.message); }
 }
 
+// ---- AUDIT (stocktake) ----
+const stamp = (ts) => new Date(ts).toLocaleString('en-MY', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).toUpperCase();
+const cleanNum = (v) => { v = String(v).replace(/[^\d.]/g, ''); const p = v.split('.'); return p.length > 1 ? p[0] + '.' + p.slice(1).join('').slice(0, 2) : v; };
+['aud-sap', 'aud-phy'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.value = cleanNum(e.target.value); discCalc(); }));
+const discText = (d) => d < 0 ? `${kgTxt(d)} KG (SHORTAGE: PHYSICAL IS LESS THAN SAP)` : d > 0 ? `+${kgTxt(d)} KG (EXCESS: PHYSICAL IS MORE THAN SAP)` : '0 KG (NO DISCREPANCY)';
+const discOf = (sap, phy) => Math.round((Number(phy) - Number(sap)) * 100) / 100;
+function discCalc() {
+  const a = $('aud-sap').value, b = $('aud-phy').value, el = $('aud-disc');
+  if (a === '' || b === '' || isNaN(Number(a)) || isNaN(Number(b))) { el.classList.add('hidden'); return; }
+  const d = discOf(a, b);
+  el.className = 'disc ' + (d < 0 ? 'short' : d > 0 ? 'excess' : 'zero');
+  el.textContent = 'QUANTITY DISCREPANCY (PHYSICAL - SAP): ' + discText(d);
+}
+let keyAud = crypto.randomUUID();
+function clearAudit() { ['aud-sap', 'aud-phy', 'aud-remark', 'aud-by'].forEach((i) => $(i).value = ''); discCalc(); $('aud-msg').className = 'msg'; }
+$('aud-clear').onclick = () => { clearAudit(); keyAud = crypto.randomUUID(); };
+
+function auditHTML(s) {
+  const d = Number(s.discrepancy);
+  const row = (k, v, cls = '') => `<tr class="${cls}"><th>${k}</th><td>${esc(String(v))}</td></tr>`;
+  return `<h3>STOCKTAKE OF ${esc(prodName())}</h3><div class="asub">STOCKTAKE NO. ${s.id}</div>
+    <table>${row('BALANCE STOCK IN THIS APP (AT SUBMISSION)', kgTxt(s.system_balance) + ' KG')}${row('SAP BALANCE STOCK', kgTxt(s.sap_balance) + ' KG')}
+    ${row('PHYSICAL COUNT QUANTITY', kgTxt(s.physical_qty) + ' KG')}${row('QUANTITY DISCREPANCY (PHYSICAL - SAP)', discText(d), 'dr')}
+    ${row('REMARK', s.remark || '-')}${row('SUBMITTED BY', s.submitted_by)}${row('DATE / TIME SUBMITTED', stamp(s.ts))}</table>`;
+}
+function viewAudit(s) { $('audrpt').innerHTML = auditHTML(s); $('audform').classList.add('hidden'); $('audhist').classList.add('hidden'); $('audres').classList.remove('hidden'); window.scrollTo({ top: 0 }); }
+$('aud-new').onclick = () => { $('audres').classList.add('hidden'); $('audform').classList.remove('hidden'); $('audhist').classList.remove('hidden'); loadAudit(); };
+$('aud-print').onclick = () => {
+  const st = document.createElement('style'); st.id = 'pgstyle'; st.textContent = '@page { size: A4 portrait; margin: 14mm; }'; document.head.appendChild(st);
+  document.body.classList.add('print-audit'); window.print();
+};
+let audItems = [];
+async function loadAudit() {
+  try {
+    const r = await api('/api/stocktake?product=' + product);
+    $('aud-bal').textContent = fmt(r.balance); audItems = r.items;
+    $('audlist').innerHTML = r.items.map((s, i) => `<div class="hrow"><div>${stamp(s.ts)}<br><span class="muted">${esc(s.submitted_by)} &middot; SAP ${kgTxt(s.sap_balance)} / PHYSICAL ${kgTxt(s.physical_qty)} / DISCREPANCY ${Number(s.discrepancy) > 0 ? '+' : ''}${kgTxt(s.discrepancy)} KG</span></div><button type="button" data-v="${i}">VIEW</button></div>`).join('') || '<div class="muted">NO STOCKTAKE YET</div>';
+  } catch (e) { $('aud-bal').textContent = '!'; showEl($('aud-msg'), false, e.message); }
+}
+$('audlist').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) viewAudit(audItems[Number(b.dataset.v)]); });
+$('aud-submit').onclick = async () => {
+  const sap = $('aud-sap').value, phy = $('aud-phy').value, by = $('aud-by').value.trim(), remark = $('aud-remark').value.trim();
+  if (!sap || isNaN(Number(sap))) return show('aud-msg', false, 'ENTER THE SAP BALANCE STOCK');
+  if (!phy || isNaN(Number(phy))) return show('aud-msg', false, 'ENTER THE PHYSICAL COUNT QUANTITY');
+  if (!by) return show('aud-msg', false, 'SUBMIT BY IS REQUIRED');
+  const d = discOf(sap, phy);
+  const c = await confirmBox({ title: 'SUBMIT THIS STOCKTAKE?', yes: 'CONFIRM SUBMIT',
+    html: `<div class="chg"><b>${esc(prodName())}</b></div><div class="chg">SAP BALANCE STOCK: ${kgTxt(sap)} KG</div><div class="chg">PHYSICAL COUNT: ${kgTxt(phy)} KG</div><div class="chg"><b>DISCREPANCY: ${discText(d)}</b></div><div class="note">A SUBMITTED STOCKTAKE IS A PERMANENT RECORD AND CANNOT BE EDITED OR DELETED.</div>` });
+  if (!c.ok) return;
+  const btn = $('aud-submit'); btn.disabled = true;
+  try {
+    const r = await api('/api/stocktake', { method: 'POST', body: JSON.stringify({ product, sap, physical: phy, remark, submittedBy: by, key: keyAud }) });
+    clearAudit(); keyAud = crypto.randomUUID(); viewAudit(r.stocktake);
+  } catch (e) { show('aud-msg', false, e.message); }
+  finally { btn.disabled = false; }
+};
+
+// ---- Ledger switch (title) ----
+function paintProduct() {
+  $('prodname').textContent = prodName();
+  document.title = 'STOCK LEDGER - ' + prodName();
+  document.querySelectorAll('.pname').forEach((el) => { el.textContent = 'LEDGER: ' + prodName(); });
+  $('prodmenu').innerHTML = PRODUCTS.map((x) => `<button type="button" data-p="${x.code}" class="${x.code === product ? 'on' : ''}">${x.name}</button>`).join('');
+}
+$('prodbtn').onclick = (e) => { e.stopPropagation(); $('prodmenu').classList.toggle('hidden'); };
+document.addEventListener('click', () => $('prodmenu').classList.add('hidden'));
+$('prodmenu').addEventListener('click', (e) => { const b = e.target.closest('button[data-p]'); if (b) setProduct(b.dataset.p); });
+function setProduct(code) {
+  $('prodmenu').classList.add('hidden');
+  if (code === product) return;
+  product = code; try { localStorage.setItem('ledger', code); } catch { /* storage blocked */ }
+  paintProduct();
+  clearIn(); clearOut(); ['in', 'out'].forEach((k) => { startDate(k); $('msg-' + k).className = 'msg'; }); keyIn = crypto.randomUUID(); keyOut = crypto.randomUUID();
+  open.clear(); lastData = null; $('days').innerHTML = ''; $('bal').textContent = '-'; $('rpt').innerHTML = '';
+  clearAudit(); keyAud = crypto.randomUUID(); $('aud-bal').textContent = '-'; $('audres').classList.add('hidden'); $('audform').classList.remove('hidden'); $('audhist').classList.remove('hidden');
+  $('arlist').innerHTML = ''; if (adminPass) admView('adm-menu');
+  showTab(activeTab());
+}
+
+paintProduct();
 loadLedger();
 </script>
 </body>
