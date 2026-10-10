@@ -194,6 +194,7 @@
       <h2>ADMIN</h2>
       <button class="menu" id="m-header" type="button">UPDATE REPORT HEADER</button>
       <button class="menu" id="m-records" type="button">UPDATE EXISTING RECORD</button>
+      <button class="menu" id="m-audit" type="button">UPDATE STOCKTAKE (AUDIT)</button>
       <button class="menu" id="m-price" type="button">UPDATE SALE PRICE PER KG</button>
       <button class="clear" id="adm-lock" type="button" style="width:100%">LOCK ADMIN</button>
     </div>
@@ -209,6 +210,15 @@
       <label>TARIKH TAMAT LESEN</label><input type="text" id="ah-exp" autocomplete="off">
       <div class="row2"><button class="clear" id="ah-back" type="button">BACK</button><button class="save" id="ah-save" type="button">SAVE HEADER</button></div>
       <div class="msg" id="ah-msg"></div>
+    </div>
+    <div id="adm-audit" class="hidden">
+      <div class="card">
+        <h2>UPDATE STOCKTAKE (AUDIT)</h2>
+        <div class="muted">THE LAST 100 STOCKTAKES OF THIS LEDGER. EVERY EDIT OR DELETE IS KEPT IN THE AUDIT LOG.</div>
+        <button class="clear" id="aa-back" type="button" style="width:100%;margin-top:12px">BACK</button>
+        <div class="msg" id="aa-msg"></div>
+      </div>
+      <div id="aalist"></div>
     </div>
     <div id="adm-price" class="card hidden">
       <h2>UPDATE SALE PRICE PER KG</h2>
@@ -659,9 +669,9 @@ const showEl = (el, ok, text) => { el.className = 'msg ' + (ok ? 'ok' : 'err'); 
 // ---- ADMIN (password is checked on the server for every action) ----
 let adminPass = null;
 const adminApi = (body) => api('/api/admin', { method: 'POST', body: JSON.stringify({ ...body, product, password: adminPass }) });
-const admViews = ['adm-login', 'adm-menu', 'adm-header', 'adm-records', 'adm-price'];
+const admViews = ['adm-login', 'adm-menu', 'adm-header', 'adm-records', 'adm-price', 'adm-audit'];
 const admView = (id) => admViews.forEach((x) => $(x).classList.toggle('hidden', x !== id));
-function lockAdmin() { adminPass = null; $('adm-pass').value = ''; $('adm-msg').className = 'msg'; $('arlist').innerHTML = ''; admView('adm-login'); }
+function lockAdmin() { adminPass = null; $('aalist').innerHTML = ''; $('adm-pass').value = ''; $('adm-msg').className = 'msg'; $('arlist').innerHTML = ''; admView('adm-login'); }
 
 async function admLogin() {
   adminPass = $('adm-pass').value;
@@ -674,7 +684,7 @@ $('adm-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') admLog
 $('adm-lock').onclick = lockAdmin;
 $('m-header').onclick = () => { admView('adm-header'); $('ahmonth').value = $('ahmonth').value || nowMY.slice(0, 7); $('ah-msg').className = 'msg'; loadHeader(); };
 $('m-records').onclick = () => { admView('adm-records'); $('ar-msg').className = 'msg'; const d = $('ardate'); d.max = todayMY(); if (!d.value) d.value = todayMY(); loadRecs(); };
-$('ah-back').onclick = $('ar-back').onclick = $('ap-back').onclick = () => admView('adm-menu');
+$('ah-back').onclick = $('ar-back').onclick = $('ap-back').onclick = $('aa-back').onclick = () => admView('adm-menu');
 $('ap-price').addEventListener('input', (e) => { e.target.value = maskRM(e.target.value); });
 $('m-price').onclick = async () => {
   admView('adm-price'); $('ap-msg').className = 'msg'; $('ap-price').value = '';
@@ -870,7 +880,7 @@ function auditHTML(s) {
   return `<h3>STOCKTAKE OF ${esc(prodName())}</h3><div class="asub">STOCKTAKE NO. ${s.id}</div>
     <table>${row('BALANCE STOCK IN THIS APP (AT SUBMISSION)', kgTxt(s.system_balance) + ' KG')}${row('SAP BALANCE STOCK', kgTxt(s.sap_balance) + ' KG')}
     ${row('PHYSICAL COUNT QUANTITY', kgTxt(s.physical_qty) + ' KG')}${row('QUANTITY DISCREPANCY (PHYSICAL - SAP)', discText(d), 'dr')}
-    ${row('REMARK', s.remark || '-')}${row('SUBMITTED BY', s.submitted_by)}${row('DATE / TIME SUBMITTED', stamp(s.ts))}</table>`;
+    ${row('REMARK', s.remark || '-')}${row('SUBMITTED BY', s.submitted_by)}${row('DATE / TIME SUBMITTED', stamp(s.ts))}${s.edited_at ? row('LAST EDITED BY ADMIN', stamp(s.edited_at)) : ''}</table>`;
 }
 function viewAudit(s) { $('audrpt').innerHTML = auditHTML(s); $('audform').classList.add('hidden'); $('audhist').classList.add('hidden'); $('audres').classList.remove('hidden'); window.scrollTo({ top: 0 }); }
 $('aud-new').onclick = () => { $('audres').classList.add('hidden'); $('audform').classList.remove('hidden'); $('audhist').classList.remove('hidden'); loadAudit(); };
@@ -894,7 +904,7 @@ $('aud-submit').onclick = async () => {
   if (!by) return show('aud-msg', false, 'SUBMIT BY IS REQUIRED');
   const d = discOf(sap, phy);
   const c = await confirmBox({ title: 'SUBMIT THIS STOCKTAKE?', yes: 'CONFIRM SUBMIT',
-    html: `<div class="chg"><b>${esc(prodName())}</b></div><div class="chg">SAP BALANCE STOCK: ${kgTxt(sap)} KG</div><div class="chg">PHYSICAL COUNT: ${kgTxt(phy)} KG</div><div class="chg"><b>DISCREPANCY: ${discText(d)}</b></div><div class="note">A SUBMITTED STOCKTAKE IS A PERMANENT RECORD AND CANNOT BE EDITED OR DELETED.</div>` });
+    html: `<div class="chg"><b>${esc(prodName())}</b></div><div class="chg">SAP BALANCE STOCK: ${kgTxt(sap)} KG</div><div class="chg">PHYSICAL COUNT: ${kgTxt(phy)} KG</div><div class="chg"><b>DISCREPANCY: ${discText(d)}</b></div><div class="note">ONLY AN ADMIN CAN EDIT OR DELETE IT AFTERWARDS.</div>` });
   if (!c.ok) return;
   const btn = $('aud-submit'); btn.disabled = true;
   try {
@@ -903,6 +913,59 @@ $('aud-submit').onclick = async () => {
   } catch (e) { show('aud-msg', false, e.message); }
   finally { btn.disabled = false; }
 };
+
+// -- admin: edit / delete stocktakes --
+const stRows = new Map();
+const stCard = (s) => `<div class="rec" data-id="${s.id}">
+  <div class="rec-h"><div><span class="badge">STOCKTAKE ${s.id}</span> &nbsp;SUBMITTED ${stamp(s.ts)}${s.edited_at ? ' &middot; EDITED ' + stamp(s.edited_at) : ''}</div><div>BALANCE IN APP THEN: ${kgTxt(s.system_balance)} KG</div></div>
+  <div class="rgrid">
+    <div><label>SAP BALANCE STOCK (KG)</label><input type="text" class="s-sap num" value="${kgTxt(s.sap_balance)}" inputmode="decimal" autocomplete="off"></div>
+    <div><label>PHYSICAL COUNT QUANTITY (KG)</label><input type="text" class="s-phy num" value="${kgTxt(s.physical_qty)}" inputmode="decimal" autocomplete="off"></div>
+    <div><label>SUBMIT BY</label><input type="text" class="s-by caps" value="${esc(s.submitted_by)}" autocomplete="off"></div>
+    <div style="grid-column:1/-1"><label>REMARK (OPTIONAL)</label><textarea class="s-rem caps" style="min-height:60px">${esc(s.remark || '')}</textarea></div>
+  </div>
+  <div class="recbtns"><button type="button" class="danger" data-sdel>DELETE</button><button type="button" class="save" data-ssave style="margin-top:0">SAVE CHANGES</button></div>
+  <div class="msg" data-msg></div></div>`;
+async function loadStRecs() {
+  try {
+    const r = await adminApi({ action: 'stocktakes_get' });
+    stRows.clear(); r.items.forEach((x) => stRows.set(x.id, x));
+    $('aalist').innerHTML = r.items.map(stCard).join('') || '<div class="card muted">NO STOCKTAKE YET</div>';
+  } catch (e) { showEl($('aa-msg'), false, e.message); }
+}
+$('m-audit').onclick = () => { admView('adm-audit'); $('aa-msg').className = 'msg'; loadStRecs(); };
+$('aalist').addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.classList.contains('caps')) t.value = t.value.toUpperCase();
+  if (t.classList.contains('num')) t.value = cleanNum(t.value);
+});
+$('aalist').addEventListener('click', async (e) => {
+  const card = e.target.closest('.rec'); if (!card) return;
+  const o = stRows.get(Number(card.dataset.id)), msg = card.querySelector('[data-msg]');
+  const q = (c) => card.querySelector('.' + c).value.trim();
+  if (e.target.closest('[data-ssave]')) {
+    const n = { sap: q('s-sap'), physical: q('s-phy'), submittedBy: q('s-by').toUpperCase(), remark: q('s-rem').toUpperCase() };
+    if (n.sap === '' || n.physical === '' || isNaN(Number(n.sap)) || isNaN(Number(n.physical))) return showEl(msg, false, 'ENTER VALID QUANTITIES');
+    if (!n.submittedBy) return showEl(msg, false, 'SUBMIT BY IS REQUIRED');
+    const was = { sap: kgTxt(o.sap_balance), physical: kgTxt(o.physical_qty), submittedBy: o.submitted_by, remark: o.remark || '' };
+    const now = { sap: kgTxt(n.sap), physical: kgTxt(n.physical), submittedBy: n.submittedBy, remark: n.remark };
+    const L = { sap: 'SAP BALANCE STOCK', physical: 'PHYSICAL COUNT', submittedBy: 'SUBMIT BY', remark: 'REMARK' };
+    const ch = Object.keys(now).filter((k) => was[k] !== now[k]);
+    if (!ch.length) return showEl(msg, false, 'NO CHANGES TO SAVE');
+    const c = await confirmBox({ title: 'SAVE CHANGES TO THIS STOCKTAKE?', yes: 'CONFIRM SAVE',
+      html: ch.map((k) => `<div class="chg"><b>${L[k]}:</b> ${esc(was[k] || '-')} &rarr; ${esc(now[k] || '-')}</div>`).join('') + `<div class="chg"><b>NEW DISCREPANCY:</b> ${discText(discOf(n.sap, n.physical))}</div>` });
+    if (!c.ok) return;
+    try { await adminApi({ action: 'stocktake_save', id: o.id, data: n }); await loadStRecs(); showEl($('aa-msg'), true, 'STOCKTAKE SAVED'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    catch (err) { showEl(msg, false, err.message); }
+  }
+  if (e.target.closest('[data-sdel]')) {
+    const c = await confirmBox({ title: 'DELETE THIS STOCKTAKE?', yes: 'CONFIRM DELETE', input: 'REASON (REQUIRED)',
+      html: `<div class="chg"><b>STOCKTAKE ${o.id}</b> OF ${stamp(o.ts)} BY ${esc(o.submitted_by)}</div><div class="note">IT WILL NO LONGER APPEAR IN THE AUDIT TAB. A COPY STAYS IN THE AUDIT LOG.</div>` });
+    if (!c.ok) return;
+    try { await adminApi({ action: 'stocktake_delete', id: o.id, reason: c.value }); await loadStRecs(); showEl($('aa-msg'), true, 'STOCKTAKE DELETED'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    catch (err) { showEl(msg, false, err.message); }
+  }
+});
 
 // ---- Ledger switch (title) ----
 function paintProduct() {
@@ -922,7 +985,7 @@ function setProduct(code) {
   clearIn(); clearOut(); ['in', 'out'].forEach((k) => { startDate(k); $('msg-' + k).className = 'msg'; }); keyIn = crypto.randomUUID(); keyOut = crypto.randomUUID();
   open.clear(); lastData = null; $('days').innerHTML = ''; $('bal').textContent = '-'; $('rpt').innerHTML = '';
   clearAudit(); keyAud = crypto.randomUUID(); $('aud-bal').textContent = '-'; $('audres').classList.add('hidden'); $('audform').classList.remove('hidden'); $('audhist').classList.remove('hidden');
-  $('arlist').innerHTML = ''; if (adminPass) admView('adm-menu');
+  $('arlist').innerHTML = ''; $('aalist').innerHTML = ''; if (adminPass) admView('adm-menu');
   showTab(activeTab());
 }
 
