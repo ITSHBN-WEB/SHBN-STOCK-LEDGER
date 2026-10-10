@@ -5,6 +5,7 @@ import { cleanFileRefs } from '../lib/files.js';
 // One endpoint for the whole ADMIN tab. Every call carries the admin password and is checked here, on the server.
 //   Every call also carries product: 'MINYAK' | 'GULA' (the ledger being worked on; default MINYAK).
 //   POST { password, action: 'price_get' } / { action: 'price_save', price } : sale price per KG for the ledger
+//   POST { password, action: 'stocktakes_get' } / 'stocktake_save' { id, data: { sap, physical, remark, submittedBy } } / 'stocktake_delete' { id, reason }
 //   POST { password, action: 'login' }
 //   POST { password, action: 'header_get',  month: 'YYYY-MM' }
 //   POST { password, action: 'header_save', month: 'YYYY-MM', header: { company, address, tel, item, licenseNo, licenseExpiry } }
@@ -127,6 +128,31 @@ export default async function handler(req, res) {
           data.sales_ref = String(d.salesRef ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join('\n').toUpperCase().slice(0, 300);
         }
         const r = await sql`SELECT admin_update_entry(${id}, ${JSON.stringify(data)}::jsonb) AS result`;
+        return res.status(200).json(r[0].result);
+      }
+
+      case 'stocktakes_get': {
+        const r = await sql`SELECT stocktakes_json(${product}, 100) AS data`;
+        return res.status(200).json(r[0].data);
+      }
+
+      case 'stocktake_save': {
+        const id = Number(b.id), d = b.data || {};
+        if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'INVALID STOCKTAKE' });
+        if (!isMoney(d.sap)) return res.status(400).json({ error: 'ENTER A VALID SAP BALANCE STOCK' });
+        if (!isMoney(d.physical)) return res.status(400).json({ error: 'ENTER A VALID PHYSICAL COUNT QUANTITY' });
+        const by = up(d.submittedBy, 60);
+        if (!by) return res.status(400).json({ error: 'SUBMIT BY IS REQUIRED' });
+        const remark = String(d.remark ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join('\n').toUpperCase().slice(0, 500);
+        const r = await sql`SELECT admin_update_stocktake(${id}, ${Number(d.sap)}, ${Number(d.physical)}, ${remark}, ${by}) AS result`;
+        return res.status(200).json(r[0].result);
+      }
+
+      case 'stocktake_delete': {
+        const id = Number(b.id), reason = up(b.reason, 200);
+        if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'INVALID STOCKTAKE' });
+        if (!reason) return res.status(400).json({ error: 'A REASON IS REQUIRED' });
+        const r = await sql`SELECT admin_delete_stocktake(${id}, ${reason}) AS result`;
         return res.status(200).json(r[0].result);
       }
 
