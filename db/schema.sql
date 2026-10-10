@@ -440,3 +440,49 @@ CREATE OR REPLACE FUNCTION stocktakes_json(p_product text, p_limit int DEFAULT 2
     'items', COALESCE((SELECT jsonb_agg(to_jsonb(s) - 'idempotency_key' ORDER BY s.ts DESC, s.id DESC)
                        FROM (SELECT * FROM stocktakes WHERE product = p_product ORDER BY ts DESC, id DESC LIMIT p_limit) s), '[]'::jsonb));
 $$;
+
+-- ===== v9: ADMIN can edit / delete a submitted stocktake (every change is logged) =====
+ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS edited_at     TIMESTAMPTZ;
+ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS deleted_at    TIMESTAMPTZ;
+ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS delete_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS stocktake_audit (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ts           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  stocktake_id BIGINT NOT NULL,
+  action       TEXT   NOT NULL,         -- EDIT | DELETE
+  old_row      JSONB  NOT NULL,
+  reason       TEXT
+);
+
+CREATE OR REPLACE FUNCTION stocktakes_json(p_product text, p_limit int DEFAULT 20) RETURNS jsonb LANGUAGE sql STABLE AS $$
+  SELECT jsonb_build_object(
+    'product', p_product,
+    'name', (SELECT name FROM products WHERE code = p_product),
+    'balance', product_balance(p_product),
+    'items', COALESCE((SELECT jsonb_agg(to_jsonb(s) - 'idempotency_key' - 'deleted_at' - 'delete_reason' ORDER BY s.ts DESC, s.id DESC)
+                       FROM (SELECT * FROM stocktakes WHERE product = p_product AND deleted_at IS NULL ORDER BY ts DESC, id DESC LIMIT p_limit) s), '[]'::jsonb));
+$$;
+
+CREATE OR REPLACE FUNCTION admin_update_stocktake(p_id bigint, p_sap numeric, p_physical numeric, p_remark text, p_by text)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE v_old stocktakes; v_new stocktakes;
+BEGIN
+  SELECT * INTO v_old FROM stocktakes WHERE id = p_id AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'NOT_FOUND'; END IF;
+  INSERT INTO stocktake_audit (stocktake_id, action, old_row) VALUES (p_id, 'EDIT', to_jsonb(v_old) - 'idempotency_key');
+  UPDATE stocktakes SET sap_balance = p_sap, physical_qty = p_physical, remark = upper(nullif(btrim(p_remark), '')),
+         submitted_by = upper(btrim(p_by)), edited_at = now() WHERE id = p_id RETURNING * INTO v_new;
+  RETURN jsonb_build_object('stocktake', to_jsonb(v_new) - 'idempotency_key' - 'deleted_at' - 'delete_reason');
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_delete_stocktake(p_id bigint, p_reason text)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE v_old stocktakes;
+BEGIN
+  SELECT * INTO v_old FROM stocktakes WHERE id = p_id AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'NOT_FOUND'; END IF;
+  INSERT INTO stocktake_audit (stocktake_id, action, old_row, reason) VALUES (p_id, 'DELETE', to_jsonb(v_old) - 'idempotency_key', p_reason);
+  UPDATE stocktakes SET deleted_at = now(), delete_reason = p_reason WHERE id = p_id;
+  RETURN jsonb_build_object('ok', true);
+END $$;
