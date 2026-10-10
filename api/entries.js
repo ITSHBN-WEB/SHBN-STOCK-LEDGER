@@ -1,4 +1,4 @@
-import { sql, guard } from '../lib/db.js';
+import { sql, guard, productOf } from '../lib/db.js';
 import { cleanFileRefs } from '../lib/files.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -8,14 +8,17 @@ const clean = (v) => String(v || '').trim().toUpperCase().slice(0, 60);
 const validDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && !Number.isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
 
 // POST /api/entries
-//  Both: { date: 'YYYY-MM-DD' }  (date of the actual stock movement, chosen and confirmed by the user)
+//  Both: { product: 'MINYAK'|'GULA',  date: 'YYYY-MM-DD' }  (date of the actual stock movement, chosen and confirmed by the user)
 //  IN : { type, quantity, supplier, brand, costPerCarton, invoiceNo, invoiceAmount, receiving1, receiving2?, supervisor, files[1-3], key }
-//  OUT: { type, quantity, recordedBy, key }
+//  OUT: { type, quantity, recordedBy, remark? (optional), key }
 export default async function handler(req, res) {
   if (!guard(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'METHOD NOT ALLOWED' });
 
   const b = req.body || {};
+  const product = productOf(b.product);
+  if (!product) return res.status(400).json({ error: 'UNKNOWN LEDGER' });
+  const remark = String(b.remark ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join('\n').toUpperCase().slice(0, 200);
   const type = String(b.type || '').toUpperCase();
   const supplier = clean(b.supplier), brand = clean(b.brand);
   const date = String(b.date || '');
@@ -46,9 +49,10 @@ export default async function handler(req, res) {
   try {
     const IN = type === 'IN';
     const rows = await sql`SELECT add_stock_entry(
-      ${type}, ${Number(b.quantity)}, ${IN ? supplier : null}, ${IN ? invoiceNo : null},
+      ${product}, ${type}, ${Number(b.quantity)}, ${IN ? supplier : null}, ${IN ? invoiceNo : null},
       ${IN ? Number(b.invoiceAmount) : null}, ${IN ? receiving1 : null}, ${IN ? (receiving2 || null) : null},
-      ${IN ? supervisor : null}, ${IN ? null : recordedBy}, ${IN ? JSON.stringify(files) : null}::jsonb, ${IN ? brand : null}, ${IN ? Number(b.costPerCarton) : null}, ${date}::date, ${key}::uuid) AS result`;
+      ${IN ? supervisor : null}, ${IN ? null : recordedBy}, ${IN ? JSON.stringify(files) : null}::jsonb, ${IN ? brand : null}, ${IN ? Number(b.costPerCarton) : null},
+      ${IN ? null : (remark || null)}, ${date}::date, ${key}::uuid) AS result`;
     res.status(200).json(rows[0].result);
   } catch (e) {
     const msg = String(e.message || '');
@@ -56,6 +60,7 @@ export default async function handler(req, res) {
       const kg = (msg.match(/only ([\d.]+) KG/) || [])[1];
       return res.status(409).json({ error: `NOT ENOUGH STOCK: ONLY ${kg ?? '0'} KG CAN BE TAKEN OUT ON THAT DATE` });
     }
+    if (msg.includes('UNKNOWN_PRODUCT')) return res.status(400).json({ error: 'UNKNOWN LEDGER' });
     if (msg.includes('DATE_IN_FUTURE')) return res.status(400).json({ error: 'DATE CANNOT BE IN THE FUTURE' });
     if (msg.includes('DATE_TOO_OLD')) return res.status(400).json({ error: `DATE TOO OLD (MAX ${(msg.match(/max (\d+)/) || [])[1] || ''} DAYS BACK)` });
     console.error(e);
