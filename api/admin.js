@@ -1,8 +1,10 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { sql, guard } from '../lib/db.js';
+import { sql, guard, productOf } from '../lib/db.js';
 import { cleanFileRefs } from '../lib/files.js';
 
 // One endpoint for the whole ADMIN tab. Every call carries the admin password and is checked here, on the server.
+//   Every call also carries product: 'MINYAK' | 'GULA' (the ledger being worked on; default MINYAK).
+//   POST { password, action: 'price_get' } / { action: 'price_save', price } : sale price per KG for the ledger
 //   POST { password, action: 'login' }
 //   POST { password, action: 'header_get',  month: 'YYYY-MM' }
 //   POST { password, action: 'header_save', month: 'YYYY-MM', header: { company, address, tel, item, licenseNo, licenseExpiry } }
@@ -22,6 +24,8 @@ export default async function handler(req, res) {
   if (!guard(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'METHOD NOT ALLOWED' });
   const b = req.body || {};
+  const product = productOf(b.product);
+  if (!product) return res.status(400).json({ error: 'UNKNOWN LEDGER' });
 
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) return res.status(503).json({ error: 'ADMIN PASSWORD IS NOT SET ON THE SERVER (VERCEL VARIABLE ADMIN_PASSWORD)' });
@@ -43,8 +47,8 @@ export default async function handler(req, res) {
       case 'header_get': {
         if (!isMonth(b.month)) return res.status(400).json({ error: 'INVALID MONTH' });
         const m = `${b.month}-01`;
-        const r = await sql`SELECT report_header(${m}::date) AS header,
-          EXISTS (SELECT 1 FROM report_headers WHERE month = ${m}::date) AS own`;
+        const r = await sql`SELECT report_header(${m}::date, ${product}) AS header,
+          EXISTS (SELECT 1 FROM report_headers WHERE month = ${m}::date AND product = ${product}) AS own`;
         return res.status(200).json(r[0]);
       }
 
@@ -56,16 +60,29 @@ export default async function handler(req, res) {
         if (!v.company) return res.status(400).json({ error: 'NAMA SYARIKAT IS REQUIRED' });
         if (!v.item) return res.status(400).json({ error: 'JENIS BARANG KAWALAN IS REQUIRED' });
         const m = `${b.month}-01`;
-        await sql`INSERT INTO report_headers (month, company, address, tel, item, license_no, license_expiry)
-          VALUES (${m}::date, ${v.company}, ${v.address}, ${v.tel}, ${v.item}, ${v.lic}, ${v.exp})
-          ON CONFLICT (month) DO UPDATE SET company = EXCLUDED.company, address = EXCLUDED.address, tel = EXCLUDED.tel,
+        await sql`INSERT INTO report_headers (product, month, company, address, tel, item, license_no, license_expiry)
+          VALUES (${product}, ${m}::date, ${v.company}, ${v.address}, ${v.tel}, ${v.item}, ${v.lic}, ${v.exp})
+          ON CONFLICT (product, month) DO UPDATE SET company = EXCLUDED.company, address = EXCLUDED.address, tel = EXCLUDED.tel,
             item = EXCLUDED.item, license_no = EXCLUDED.license_no, license_expiry = EXCLUDED.license_expiry, updated_at = now()`;
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'price_get': {
+        const r = await sql`SELECT name, unit_price FROM products WHERE code = ${product}`;
+        if (!r[0]) return res.status(400).json({ error: 'UNKNOWN LEDGER' });
+        return res.status(200).json({ name: r[0].name, price: r[0].unit_price });
+      }
+
+      case 'price_save': {
+        if (!isMoney(b.price) || Number(b.price) <= 0) return res.status(400).json({ error: 'ENTER A VALID PRICE PER KG' });
+        const r = await sql`UPDATE products SET unit_price = ${Number(b.price)} WHERE code = ${product} RETURNING code`;
+        if (!r[0]) return res.status(400).json({ error: 'UNKNOWN LEDGER' });
         return res.status(200).json({ ok: true });
       }
 
       case 'records_get': {
         if (!isDate(b.date)) return res.status(400).json({ error: 'INVALID DATE' });
-        const r = await sql`SELECT admin_records_json(${b.date}::date) AS records`;
+        const r = await sql`SELECT admin_records_json(${b.date}::date, ${product}) AS records`;
         return res.status(200).json({ records: r[0].records });
       }
 
