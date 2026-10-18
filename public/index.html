@@ -114,6 +114,11 @@
   .rpt tr.foot td { height:20px; font-size:12px; font-weight:700; }
   .rpt td.grey { background:#a6a6a6; text-align:right; padding-right:6px; } .rpt td.black { background:#000; }
   .rpt td.val { font-weight:400; font-size:12px; }
+  /* live refresh bar */
+  .live { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin:-6px 0 12px; font-size:12px; letter-spacing:.05em; color:var(--muted); }
+  .live .dot { width:9px; height:9px; border-radius:50%; background:#5ee08f; box-shadow:0 0 6px #5ee08f; }
+  .live .dot.off { background:#aaa; box-shadow:none; } .live .dot.bad { background:#ffb347; box-shadow:0 0 6px #ffb347; }
+  .live button { border:1px solid var(--line); background:transparent; color:var(--ink); border-radius:8px; padding:6px 12px; font:inherit; font-size:12px; font-weight:700; letter-spacing:.08em; cursor:pointer; }
   /* ledger switch (title) + banners */
   .pwrap { position:relative; display:inline-block; }
   #prodbtn { font:inherit; letter-spacing:inherit; color:#4338ca; background:#fff; border:0; border-radius:8px; padding:5px 12px; cursor:pointer; }
@@ -137,7 +142,7 @@
   .hrow button { border:1px solid var(--line); background:transparent; color:#fff; border-radius:8px; padding:8px 14px; font:inherit; font-size:12px; font-weight:700; letter-spacing:.08em; cursor:pointer; }
   body.print-audit::before { background:#fff; }
   body.print-audit .wrap { max-width:none; padding:0; }
-  body.print-audit h1, body.print-audit .tabs, body.print-audit #dash, body.print-audit #add, body.print-audit #rep, body.print-audit #adm,
+  body.print-audit h1, body.print-audit .live, body.print-audit .tabs, body.print-audit #dash, body.print-audit #add, body.print-audit #rep, body.print-audit #adm,
   body.print-audit #audform, body.print-audit #audhist, body.print-audit .rtools { display:none !important; }
   body.print-audit #aud { display:block !important; max-width:none; }
   body.print-audit #audres { display:block !important; }
@@ -148,7 +153,7 @@
      scaled to ONE sheet before the print dialog opens. */
   body.print-report::before { background:#fff; }
   body.print-report .wrap { max-width:none; padding:0; }
-  body.print-report h1, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report #aud, body.print-report #adm, body.print-report .rtools { display:none !important; }
+  body.print-report h1, body.print-report .live, body.print-report .tabs, body.print-report #dash, body.print-report #add, body.print-report #aud, body.print-report #adm, body.print-report .rtools { display:none !important; }
   body.print-report #rep { display:block !important; }
   body.print-report .paper { padding:0; border-radius:0; overflow:visible; }
   body.print-report .rpt { min-width:0; width:281mm; font-size:8pt; }
@@ -161,6 +166,7 @@
 <body>
 <div class="wrap">
   <h1>STOCK LEDGER &mdash; <span class="pwrap"><button type="button" id="prodbtn" aria-haspopup="true"><span id="prodname"></span> &#9662;</button><div id="prodmenu" class="hidden"></div></span></h1>
+  <div class="live"><span class="dot" id="live-dot"></span><span id="live-txt">LIVE</span><button type="button" id="live-btn">PAUSE</button></div>
   <div class="tabs">
     <button class="tab active" data-tab="dash">DASHBOARD</button>
     <button class="tab" data-tab="add">ADD RECORD</button>
@@ -365,6 +371,7 @@ function showTab(t) {
   if (t === 'dash') loadLedger();
   if (t === 'rep') loadReport();
   if (t === 'aud') loadAudit();
+  if (typeof liveAt !== 'undefined') { liveAt = Date.now(); liveText(); }
 }
 document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
 document.querySelectorAll('[data-sub]').forEach((b) => b.onclick = () => {
@@ -421,12 +428,12 @@ $('days').addEventListener('click', (ev) => {
   renderLedger();
 });
 
-async function loadLedger() {
+async function loadLedger(silent) {
   try {
     lastData = await api('/api/ledger?product=' + product + '&month=' + $('month').value);
     maxBack = lastData.max_backdate_days || 31; ['in', 'out'].forEach(limits);
-    renderLedger();
-  } catch (e) { $('bal').textContent = '!'; alert(e.message); }
+    renderLedger(); return true;
+  } catch (e) { if (!silent) { $('bal').textContent = '!'; alert(e.message); } return false; }
 }
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -633,11 +640,11 @@ function reportHTML(r) {
         <tr class="foot"><td class="grey" colspan="4">JUMLAH</td><td class="val">${kgTxt(r.total_in)}</td><td class="grey" colspan="4">JUMLAH</td><td class="val">${kgTxt(r.total_out)}</td><td class="black" colspan="3"></td></tr>
       </tbody></table>`;
 }
-async function loadReport() {
+async function loadReport(silent) {
   try {
     const r = await api('/api/report?product=' + product + '&month=' + $('rmonth').value);
-    $('rpt').innerHTML = reportHTML(r);
-  } catch (e) { $('rpt').innerHTML = `<div style="color:#b00020;font-weight:700">${esc(e.message)}</div>`; }
+    $('rpt').innerHTML = reportHTML(r); return true;
+  } catch (e) { if (silent) return false; $('rpt').innerHTML = `<div style="color:#b00020;font-weight:700">${esc(e.message)}</div>`; }
 }
 // One sheet: measure the report in print layout (A4 landscape, 8 mm margins) and shrink it to fit the page height.
 $('rprint').onclick = () => {
@@ -889,12 +896,13 @@ $('aud-print').onclick = () => {
   document.body.classList.add('print-audit'); window.print();
 };
 let audItems = [];
-async function loadAudit() {
+async function loadAudit(silent) {
   try {
     const r = await api('/api/stocktake?product=' + product);
     $('aud-bal').textContent = fmt(r.balance); audItems = r.items;
     $('audlist').innerHTML = r.items.map((s, i) => `<div class="hrow"><div>${stamp(s.ts)}<br><span class="muted">${esc(s.submitted_by)} &middot; SAP ${kgTxt(s.sap_balance)} / PHYSICAL ${kgTxt(s.physical_qty)} / DISCREPANCY ${Number(s.discrepancy) > 0 ? '+' : ''}${kgTxt(s.discrepancy)} KG</span></div><button type="button" data-v="${i}">VIEW</button></div>`).join('') || '<div class="muted">NO STOCKTAKE YET</div>';
-  } catch (e) { $('aud-bal').textContent = '!'; showEl($('aud-msg'), false, e.message); }
+    return true;
+  } catch (e) { if (!silent) { $('aud-bal').textContent = '!'; showEl($('aud-msg'), false, e.message); } return false; }
 }
 $('audlist').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) viewAudit(audItems[Number(b.dataset.v)]); });
 $('aud-submit').onclick = async () => {
@@ -989,8 +997,34 @@ function setProduct(code) {
   showTab(activeTab());
 }
 
+// ---- LIVE refresh: every 30 s the open tab re-reads the database, so changes made on another device appear by themselves ----
+const LIVE_MS = 30000;
+let livePaused = false, liveTry = 0, liveAt = Date.now(), liveBad = false, liveBusy = false;
+const idle = () => !$('modal').classList.contains('hidden')                      // a popup is open
+  || (activeTab() === 'adm') || (activeTab() === 'aud' && !$('audres').classList.contains('hidden'))   // never replace what an admin is editing / a stocktake being viewed
+  || (activeTab() === 'add');                                                     // forms being typed: nothing live to show there
+function liveText() {
+  const sec = Math.max(0, Math.round((Date.now() - liveAt) / 1000));
+  $('live-dot').className = 'dot' + (livePaused ? ' off' : liveBad ? ' bad' : '');
+  $('live-txt').textContent = livePaused ? 'PAUSED' : liveBad ? 'CONNECTION LOST, RETRYING' : `LIVE \u00b7 UPDATED ${sec}S AGO \u00b7 EVERY 30S`;
+  $('live-btn').textContent = livePaused ? 'RESUME' : 'PAUSE';
+}
+async function liveRefresh() {
+  if (livePaused || liveBusy || document.hidden) return;
+  const t = activeTab();
+  if (idle()) { liveAt = Date.now(); return liveText(); }
+  liveBusy = true;
+  try {
+    const ok = t === 'dash' ? await loadLedger(true) : t === 'rep' ? await loadReport(true) : t === 'aud' ? await loadAudit(true) : true;
+    liveBad = !ok; liveTry = Date.now(); if (ok) liveAt = liveTry;
+  } finally { liveBusy = false; liveText(); }
+}
+$('live-btn').onclick = () => { livePaused = !livePaused; if (!livePaused) { liveAt = Date.now(); liveRefresh(); } liveText(); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !livePaused && Date.now() - Math.max(liveAt, liveTry) >= LIVE_MS) liveRefresh(); });   // coming back to the tab: catch up at once
+setInterval(() => { if (Date.now() - Math.max(liveAt, liveTry) >= LIVE_MS) liveRefresh(); else liveText(); }, 1000);
+
 paintProduct();
-loadLedger();
+loadLedger().then(() => { liveAt = Date.now(); liveText(); });
 </script>
 </body>
 </html>
